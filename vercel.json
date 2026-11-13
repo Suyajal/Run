@@ -1,7 +1,7 @@
 {
   "functions": {
     "server.mjs": {
-      "includeFiles": "{node_modules/tesseract.js/src/worker-script/**,node_modules/tesseract.js-core/**,node_modules/.pnpm/tesseract.js*/node_modules/tesseract.js/src/worker-script/**,node_modules/.pnpm/tesseract.js-core*/node_modules/tesseract.js-core/**}"
+      "includeFiles": "{node_modules/tesseract.js/src/worker-script/**,node_modules/tesseract.js-core/**}"
     }
   }
 }
