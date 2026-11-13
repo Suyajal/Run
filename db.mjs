@@ -2,18 +2,64 @@ import pg from 'pg';
 import {readFileSync} from 'node:fs';
 import {X509Certificate} from 'node:crypto';
 
-const pin = process.env.PG_TLS_PIN_PEM
-  ? Buffer.from(process.env.PG_TLS_PIN_PEM)
-  : process.env.PG_TLS_PIN_FILE ? readFileSync(process.env.PG_TLS_PIN_FILE) : null;
-const fingerprint = pin ? new X509Certificate(pin).fingerprint256 : null;
-const ssl = pin ? {
-  ca:pin,allowPartialTrustChain:true,
-  checkServerIdentity:(_host,cert)=>cert.fingerprint256===fingerprint ? undefined : Error('PostgreSQL certificate changed')
-} : undefined;
-export const db = new pg.Pool({
-  ssl, options:'-c search_path=public -c statement_timeout=12000', connectionTimeoutMillis:5000
-});
-db.on('error', err => console.error('PostgreSQL connection:', err.code));
+const instanceConnectionName = process.env.CLOUD_SQL_INSTANCE_CONNECTION_NAME;
+
+function directOptions() {
+  const pin = process.env.PG_TLS_PIN_PEM
+    ? Buffer.from(process.env.PG_TLS_PIN_PEM)
+    : process.env.PG_TLS_PIN_FILE ? readFileSync(process.env.PG_TLS_PIN_FILE) : null;
+  const fingerprint = pin ? new X509Certificate(pin).fingerprint256 : null;
+  const ssl = pin ? {
+    ca:pin,allowPartialTrustChain:true,
+    checkServerIdentity:(_host,cert)=>cert.fingerprint256===fingerprint ? undefined : Error('PostgreSQL certificate changed')
+  } : undefined;
+  return {ssl};
+}
+
+function createPool(options) {
+  const pool = new pg.Pool({
+    options:'-c search_path=public -c statement_timeout=12000',
+    connectionTimeoutMillis:5000,
+    ...options
+  });
+  pool.on('error', err => console.error('PostgreSQL connection:', err.code));
+  return pool;
+}
+
+async function createCloudPool() {
+  const [{Connector}, {GoogleAuth}] = await Promise.all([
+    import('@google-cloud/cloud-sql-connector'),
+    import('google-auth-library')
+  ]);
+  const rawCredentials = process.env.CLOUD_SQL_CREDENTIALS_JSON;
+  const credentials = rawCredentials ? JSON.parse(rawCredentials) : undefined;
+  if (credentials && credentials.type !== 'service_account') {
+    throw Error('CLOUD_SQL_CREDENTIALS_JSON must contain a service account key.');
+  }
+  const auth = new GoogleAuth({credentials, scopes:['https://www.googleapis.com/auth/sqlservice.admin']});
+  const connector = new Connector({auth});
+  try {
+    const options = await connector.getOptions({instanceConnectionName, ipType:'PUBLIC'});
+    return createPool({...options, ssl:false});
+  } catch (err) {
+    connector.close();
+    throw err;
+  }
+}
+
+let cloudPool;
+function getCloudPool() {
+  cloudPool ??= createCloudPool().catch(err => {
+    cloudPool = undefined;
+    throw err;
+  });
+  return cloudPool;
+}
+
+export const db = instanceConnectionName ? {
+  async query(...args) { return (await getCloudPool()).query(...args); },
+  async connect() { return (await getCloudPool()).connect(); }
+} : createPool(directOptions());
 export async function transaction(fn) {
   const client = await db.connect();
   try {

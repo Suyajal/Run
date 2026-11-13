@@ -35,6 +35,20 @@
 
 ## 연결 설정
 
+### Vercel에서 Cloud SQL 연결
+
+Cloud SQL 인스턴스에 공인 IP가 있어야 합니다. Google Cloud 프로젝트에서 Cloud SQL Admin API를 활성화하고, 배포용 서비스 계정에 Cloud SQL Client (`roles/cloudsql.client`) 역할을 부여합니다.
+
+Vercel Production 환경 변수에 다음 값을 등록한 뒤 재배포합니다.
+
+- `CLOUD_SQL_INSTANCE_CONNECTION_NAME`에는 Cloud SQL 인스턴스 개요의 연결 이름(`프로젝트:리전:인스턴스`)을 입력합니다.
+- `CLOUD_SQL_CREDENTIALS_JSON`에는 서비스 계정 키 JSON 전체를 Secret으로 등록합니다. 로컬에서 Application Default Credentials를 사용한다면 생략할 수 있습니다.
+- `PGDATABASE`, `PGUSER`, `PGPASSWORD`는 기존 PostgreSQL 값을 유지합니다. `APP_SECRET`도 기존 값을 유지합니다.
+
+Connector는 인증과 TLS 연결을 처리하며 승인된 네트워크에 Vercel IP를 등록할 필요가 없습니다. Vercel의 기존 `PGHOST`, `PGPORT`, `PG_TLS_PIN_PEM`, `PG_TLS_PIN_FILE`, `PGSSLMODE` 설정은 Connector 전환 후 제거할 수 있습니다. 재배포 후 `/api/health`에서 연결을 확인합니다.
+
+### 로컬 직접 연결
+
 현재 로컬 환경은 제공된 DB에서 관찰한 서버 인증서를 `PG_TLS_PIN_FILE`로 고정합니다. DB 인증서를 갱신하면 운영자가 확인한 새 인증서 또는 CA 파일로 연결 설정을 갱신합니다. CA로 연결할 때는 `PGSSLMODE=verify-full`과 `PGSSLROOTCERT`를 사용합니다.
 
 HTTPS 역방향 프록시 뒤에서 실행하는 경우 `COOKIE_SECURE=1`과 서비스의 정확한 `APP_ORIGIN`을 설정합니다.
