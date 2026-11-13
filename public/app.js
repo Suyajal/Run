@@ -122,6 +122,7 @@ function recordDetail(record){
   modal('러닝 상세',`<div class="form"><p class="info">${esc(record.display_name)} · ${source(record.source_app)}</p>
     <div class="detail-grid">${details.map(([key,label],i)=>`<div><small>${label}</small><strong>${record[key]==null?'—':esc(format[i](record[key]))}</strong>
       ${record.meta?.some(m=>m.field_code===key)?`<span>${origins[record.meta.find(m=>m.field_code===key).value_origin]}</span>`:''}</div>`).join('')}</div>
+    ${record.has_capture?'<details><summary>업로드한 원본 사진</summary><img class="record-capture" loading="lazy" src="/api/records/'+encodeURIComponent(record.record_id)+'/capture" alt="업로드한 러닝 캡처 원본"></details>':''}
     ${me&&record.user_id===me.user_id?button('기록 및 공유 수정','edit:'+record.record_id,'primary'):''}</div>`);
 }
 function timeFields(legend,prefix,value,withHours){

@@ -12,3 +12,5 @@ dialog{border:1px solid var(--line);border-radius:15px;max-width:min(550px,calc(
 
 
 .time-parts{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
+
+.record-capture { display: block; max-width: 100%; height: auto; margin-top: 0.75rem; }

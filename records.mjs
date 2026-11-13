@@ -42,12 +42,22 @@ records.get('/records/:id',async(req,res)=>{
   const item=await accessible(db,id,uid);
   check(item,'기록을 볼 수 없습니다.',404);
   if(item.user_id===uid){
+    const capture=await one(db,'select image_base64 is not null as available from running_record where record_id=$1',[id]);
+    item.has_capture=!!capture?.available;
     item.meta=await rows(db,'select field_code,value_origin,recognized_value from record_field_meta where record_id=$1',[id]);
     item.groups=(await rows(db,'select group_id from record_group_share where record_id=$1',[id])).map(r=>r.group_id);
   }
   res.json(item);
 });
 let active=0;
+records.get('/records/:id/capture',async(req,res)=>{
+  const capture=await one(db,`select image_base64 from running_record
+    where record_id=$1 and user_id=$2 and deleted_at is null and image_base64 is not null`,
+    [uuid(req.params.id),req.user.user_id]);
+  check(capture,'볼 수 있는 원본 사진이 없습니다.',404);
+  const image=Buffer.from(capture.image_base64,'base64');
+  res.type(image[0]===0x89?'image/png':'image/jpeg').send(image);
+});
 function captureDate(text,samsungDetails){
   const patterns=[
     /\b(20\d{2})[ \t]*년[ \t]*(\d{1,2})[ \t]*월[ \t]*(\d{1,2})[ \t]*일/,
@@ -106,6 +116,7 @@ records.post('/imports',upload.single('capture'),async(req,res)=>{
     file.subarray(0,3).equals(Buffer.from('ffd8ff','hex'))),'PNG 또는 JPEG 이미지를 선택해 주세요.');
   check(active<2,'현재 이미지 분석 중입니다. 잠시 후 다시 시도해 주세요.',429);
   const id=randomUUID(), imageHash=digest(file), uid=req.user.user_id;
+  const original=file.toString('base64');
   active++;
   let image;
   try {
@@ -115,8 +126,12 @@ records.post('/imports',upload.single('capture'),async(req,res)=>{
     check(false,'이미지를 읽을 수 없습니다. 최대 1,600만 픽셀의 PNG 또는 JPEG를 선택해 주세요.');
   } finally {file.fill(0);}
   try{
-    await db.query(`insert into record_import(import_id,user_id,image_sha256,status,expires_at)
-      values($1,$2,$3,'ANALYZING',now()+interval '1 day')`,[id,uid,imageHash]);
+    await transaction(async c=>{
+      await c.query(`update record_import set image_base64=null,original_deleted_at=now()
+        where user_id=$1 and expires_at<=now() and image_base64 is not null`,[uid]);
+      await c.query(`insert into record_import(import_id,user_id,image_sha256,status,expires_at,image_base64)
+        values($1,$2,$3,'ANALYZING',now()+interval '1 day',$4)`,[id,uid,imageHash,original]);
+    });
   } catch(err){image.fill(0);active--;throw err;}
   req.file=null;
   const analyze=async()=>{
@@ -125,7 +140,7 @@ records.post('/imports',upload.single('capture'),async(req,res)=>{
     finally{image.fill(0);active--;}
     await db.query(`update record_import set status=case when status='ANALYZING' then 'READY' else status end,
       source_app=case when status='ANALYZING' then $2 end,extracted_values=case when status='ANALYZING' then $3::jsonb end,
-      error_code=$4,original_deleted_at=now(),updated_at=now() where import_id=$1 and status in ('ANALYZING','CANCELLED')`,
+      error_code=$4,updated_at=now() where import_id=$1 and status='ANALYZING'`,
       [id,result?.source||null,result?.values||{},result?null:'OCR_FAILED']);
   };
   if(process.env.VERCEL){
@@ -142,7 +157,7 @@ records.get('/imports/:id',async(req,res)=>{
   res.json(item);
 });
 records.delete('/imports/:id',async(req,res)=>{
-  await db.query("update record_import set status='CANCELLED',updated_at=now() where import_id=$1 and user_id=$2 and status in ('ANALYZING','READY')",
+  await db.query("update record_import set status='CANCELLED',image_base64=null,original_deleted_at=now(),updated_at=now() where import_id=$1 and user_id=$2 and status in ('ANALYZING','READY')",
     [uuid(req.params.id),req.user.user_id]);
   res.json({ok:true});
 });
@@ -218,7 +233,9 @@ records.post('/records',async(req,res)=>{
         where $1 in(f.user_low_id,f.user_high_id) and f.status='ACCEPTED'`,[uid,id]);
     }
     await c.query('insert into record_save_request(user_id,idempotency_key,request_hash,record_id) values($1,$2,$3,$4)',[uid,key,requestHash,id]);
-    await c.query("update record_import set status='CONFIRMED',updated_at=now() where import_id=$1",[imp]);
+    await c.query(`update running_record set image_base64=(select image_base64 from record_import where import_id=$1)
+      where record_id=$2`,[imp,id]);
+    await c.query("update record_import set status='CONFIRMED',image_base64=null,original_deleted_at=now(),updated_at=now() where import_id=$1",[imp]);
     return id;
   });
   res.json({record_id:id});
