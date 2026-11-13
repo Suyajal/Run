@@ -153,7 +153,7 @@ function timeFields(legend,prefix,value,withHours){
 }
 const captureIntro=()=>head('러닝 기록 등록','캡처를 분석한 뒤 운동 수치를 확인하세요.')+
   panel('러닝 화면 선택',`<form class="upload" data-form="upload"><span class="row-icon">${icon('upload')}</span>
-  <strong>삼성 헬스 또는 Apple Fitness</strong><p>PNG 또는 JPEG · 최대 8 MB</p><input aria-label="러닝 캡처 이미지" type="file" name="capture" accept="image/png,image/jpeg" required>
+  <strong>삼성 헬스 또는 Apple Fitness</strong><p>PNG 또는 JPEG · 최대 4 MB</p><input aria-label="러닝 캡처 이미지" type="file" name="capture" accept="image/png,image/jpeg" required>
   <div class="actions"><button class="button primary">분석 시작</button></div></form>`);
 function recordForm(r,groups,importId){
   const meta=r.meta||[], isNew=!!importId;

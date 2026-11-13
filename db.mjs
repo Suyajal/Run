@@ -2,7 +2,9 @@ import pg from 'pg';
 import {readFileSync} from 'node:fs';
 import {X509Certificate} from 'node:crypto';
 
-const pin = process.env.PG_TLS_PIN_FILE ? readFileSync(process.env.PG_TLS_PIN_FILE) : null;
+const pin = process.env.PG_TLS_PIN_PEM
+  ? Buffer.from(process.env.PG_TLS_PIN_PEM)
+  : process.env.PG_TLS_PIN_FILE ? readFileSync(process.env.PG_TLS_PIN_FILE) : null;
 const fingerprint = pin ? new X509Certificate(pin).fingerprint256 : null;
 const ssl = pin ? {
   ca:pin,allowPartialTrustChain:true,

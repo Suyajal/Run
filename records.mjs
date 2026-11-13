@@ -2,12 +2,13 @@ import { Router } from 'express';
 import multer from 'multer';
 import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
+import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { db, one, rows, transaction, check, restriction, uuid, date } from './db.mjs';
 import { digest } from './identity.mjs';
 
 export const records=Router();
-const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:8*1024*1024,files:1,fields:0}});
+const upload=multer({storage:multer.memoryStorage(),limits:{fileSize:4*1024*1024,files:1,fields:0}});
 const sources=['SAMSUNG_HEALTH','APPLE_FITNESS'];
 const fields=['exercise_date','distance_m','duration_sec','avg_pace_sec_km','avg_speed_kmh','avg_cadence_spm','avg_heart_rate_bpm','elevation_gain_m'];
 const recordSelect=`r.record_id,r.user_id,u.display_name,r.source_app,r.exercise_date::text,r.distance_m,r.duration_sec,
@@ -65,7 +66,7 @@ function captureDate(text,samsungDetails){
   }
 }
 export async function readCapture(bytes){
-  const worker=await createWorker(process.env.OCR_LANG || 'eng',1,{cachePath:'ocr-cache'});
+  const worker=await createWorker(process.env.OCR_LANG || 'eng',1,{cachePath:process.env.VERCEL ? tmpdir() : 'ocr-cache'});
   try{
     const {data}=await worker.recognize(bytes);
     const text=data.text.normalize('NFKC');
@@ -111,8 +112,7 @@ records.post('/imports',upload.single('capture'),async(req,res)=>{
       values($1,$2,$3,'ANALYZING',now()+interval '1 day')`,[id,uid,imageHash]);
   } catch(err){image.fill(0);active--;throw err;}
   req.file=null;
-  res.status(202).json({id});
-  void (async()=>{
+  const analyze=async()=>{
     let result;
     try{result=await readCapture(image);}catch(err){console.error('OCR',err.code||err.name);}
     finally{image.fill(0);active--;}
@@ -120,7 +120,13 @@ records.post('/imports',upload.single('capture'),async(req,res)=>{
       source_app=case when status='ANALYZING' then $2 end,extracted_values=case when status='ANALYZING' then $3::jsonb end,
       error_code=$4,original_deleted_at=now(),updated_at=now() where import_id=$1 and status in ('ANALYZING','CANCELLED')`,
       [id,result?.source||null,result?.values||{},result?null:'OCR_FAILED']);
-  })().catch(err=>console.error('OCR result',err.code));
+  };
+  if(process.env.VERCEL){
+    await analyze();
+    return res.status(202).json({id});
+  }
+  res.status(202).json({id});
+  void analyze().catch(err=>console.error('OCR result',err.code));
 });
 records.get('/imports/:id',async(req,res)=>{
   const item=await one(db,`select import_id,status,source_app,extracted_values,error_code from record_import
