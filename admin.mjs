@@ -79,12 +79,6 @@ admin.post('/users/:id/release',async(req,res)=>{
   });
   res.json({ok:true});
 });
-admin.post('/users/:id/reset-guidance',async(req,res)=>{
-  const id=uuid(req.params.id);
-  check(await one(db,'select 1 from app_user where user_id=$1',[id]),'사용자를 찾을 수 없습니다.',404);
-  await audit(db,req,'RESET_GUIDANCE',id);
-  res.json({message:'로그인 화면에서 비밀번호 초기화를 선택한 뒤 아이디와 가입 휴대폰으로 인증해 주세요.'});
-});
 admin.get('/stats',async(req,res)=>{
   const from=date(req.query.from),to=date(req.query.to);
   check(from<=to,'조회 시작일과 종료일을 확인해 주세요.');

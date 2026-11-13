@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { rateLimit } from 'express-rate-limit';
 import { randomBytes,randomUUID } from 'node:crypto';
 import { db,one,rows,transaction,check,uuid,string,restriction } from './db.mjs';
-import { digest,lookup,phone } from './identity.mjs';
+import { digest } from './identity.mjs';
 export const social=Router();
 social.get('/friends',async(req,res)=>{
   res.json(await rows(db,`select f.relation_id,f.requested_by,f.status,u.user_id,u.display_name from friend_relation f
@@ -13,8 +13,8 @@ social.get('/friends',async(req,res)=>{
 social.post('/friends/search',rateLimit({windowMs:60000,limit:15,keyGenerator:req=>req.user.user_id,message:{message:'검색 요청이 많습니다. 잠시 후 다시 시도해 주세요.'}}),async(req,res)=>{
   const u=await one(db,`select u.user_id,u.display_name,f.status from app_user u left join friend_relation f
     on f.user_low_id=least(u.user_id,$2) and f.user_high_id=greatest(u.user_id,$2)
-    where u.phone_lookup_hash=$1 and u.user_id<>$2 and not ${restriction('u.user_id')}`,
-    [lookup(phone(req.body.phone)),req.user.user_id]);
+    where u.login_id=$1 and u.user_id<>$2 and not ${restriction('u.user_id')}`,
+    [string(req.body.login_id,50,3),req.user.user_id]);
   res.json(u??null);
 });
 social.post('/friends/request',async(req,res)=>{

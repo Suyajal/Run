@@ -102,34 +102,15 @@ function login(){
   modal('로그인',`<form class="form" data-form="login">${field('아이디','login_id','required maxlength="50" autocomplete="username"')}
     ${field('비밀번호','password','type="password" required maxlength="128" autocomplete="current-password"')}
     <button class="button primary">로그인</button><div class="actions">
-    ${button('회원가입','verify:SIGNUP')}${button('아이디 찾기','verify:FIND_ID')}${button('비밀번호 초기화','verify:RESET_PASSWORD')}</div></form>`);
+    ${button('회원가입','signup')}</div></form>`);
 }
-const purposeTitle={SIGNUP:'회원가입',FIND_ID:'아이디 찾기',RESET_PASSWORD:'비밀번호 초기화',CHANGE_PHONE:'전화번호 변경'};
-async function verifyStart(purpose){
-  const config=await api('/auth/config');
-  if(purpose==='SIGNUP' && config.skipSignupSms){
-    verifyFinish(purpose,null);
-    return;
-  }
-  modal(purposeTitle[purpose],`<form class="form" data-form="verify-start" data-purpose="${purpose}">
-    ${!config.smsConfigured?'<p class="info">문자 발송 서비스 설정이 필요합니다.</p>':''}
-    ${purpose==='RESET_PASSWORD'?field('아이디','login_id','required maxlength="50" autocomplete="username"'):''}
-    ${purpose==='CHANGE_PHONE'?field('현재 비밀번호','password','type="password" required autocomplete="current-password"'):''}
-    ${field(purpose==='CHANGE_PHONE'?'새 휴대폰 번호':'휴대폰 번호','phone','type="tel" required placeholder="010-1234-5678" autocomplete="tel"')}
-    <button class="button primary" ${!config.smsConfigured?'disabled':''}>인증번호 받기</button></form>`);
-}
-function verifyCode(purpose,id){
-  modal(purposeTitle[purpose],`<form class="form" data-form="verify-code" data-purpose="${purpose}" data-id="${esc(id)}">
-    <p class="info">문자로 받은 인증번호를 5분 안에 입력해 주세요.</p>${field('인증번호','code','required minlength="6" maxlength="6" inputmode="numeric" autocomplete="one-time-code"')}
-    <button class="button primary">인증 확인</button>${button('번호 다시 입력','verify:'+purpose)}</form>`);
-}
-function verifyFinish(purpose,id){
-  const fields=purpose==='SIGNUP'?field('이름','display_name','required maxlength="100"')+field('아이디','login_id','required minlength="3" maxlength="50" autocomplete="username"'):'';
-  modal(purposeTitle[purpose],`<form class="form" data-form="verify-finish" data-purpose="${purpose}" data-id="${esc(id)}">
-    ${purpose==='SIGNUP'&&!id?'<p class="info">테스트 계정은 문자 인증 없이 만들 수 있습니다.</p>':''}
-    ${fields}${['SIGNUP','RESET_PASSWORD'].includes(purpose)?field('새 비밀번호','password','type="password" required minlength="8" maxlength="128" autocomplete="new-password"')+
-      field('비밀번호 확인','confirm','type="password" required minlength="8" maxlength="128" autocomplete="new-password"'):''}
-    <button class="button primary">${purpose==='FIND_ID'?'아이디 확인':'완료'}</button></form>`);
+function signup(){
+  modal('회원가입',`<form class="form" data-form="signup">
+    ${field('이름','display_name','required maxlength="100"')}
+    ${field('아이디','login_id','required minlength="3" maxlength="50" autocomplete="username"')}
+    ${field('비밀번호','password','type="password" required minlength="8" maxlength="128" autocomplete="new-password"')}
+    ${field('비밀번호 확인','confirm','type="password" required minlength="8" maxlength="128" autocomplete="new-password"')}
+    <button class="button primary">가입하기</button></form>`);
 }
 function recordDetail(record){
   const format=[v=>v,v=>km(v)+' km',v=>`${Math.floor(v/3600)}시간 ${Math.floor(v/60)%60}분 ${v%60}초`,
@@ -240,7 +221,7 @@ async function adminUser(id){
     <div class="detail-grid">${[['가입일',when(u.created_at)],['최근 활동',when(u.last_seen)],['확정 기록',u.records+'건'],['가입 그룹',u.groups+'개'],['친구',u.friends+'명'],['비밀번호 변경',when(u.password_changed_at)]].map(([k,v])=>`<div><small>${k}</small><strong>${esc(v)}</strong></div>`).join('')}</div>
     <h3>제한 이력</h3>${u.history.map(h=>`<div class="row"><span class="row-main"><strong>${esc(h.reason)}</strong><small>${esc(h.actor)} · ${when(h.starts_at)} ~ ${h.ends_at?when(h.ends_at):'무기한'}</small>
     ${h.revoked_at?`<small>해제 · ${esc(h.revoked_by)} · ${when(h.revoked_at)} · ${esc(h.revoke_reason)}</small>`:''}</span><span class="pill">${h.active?'제한 중':h.revoked_at?'해제':'종료'}</span></div>`).join('')||empty('이용 제한 이력이 없습니다.')}
-    <div class="actions">${id===me.user_id?'':button(u.limited?'이용 제한 해제':'이용 제한 설정',(u.limited?'release:':'restrict:')+id,'danger')}${button('비밀번호 초기화 안내','guidance:'+id)}</div></div>`);
+    <div class="actions">${id===me.user_id?'':button(u.limited?'이용 제한 해제':'이용 제한 설정',(u.limited?'release:':'restrict:')+id,'danger')}</div></div>`);
 }
 function statsPage(){
   const today=localDate();
@@ -278,7 +259,7 @@ async function render(){
     else if(view==='groups') content=groupsPage(await api('/groups'));
     else if(view==='notifications') content=notificationsPage(await api('/notifications'));
     else if(view==='settings') content=head('설정')+panel('내 계정',`<div class="form"><p class="info">${esc(me.display_name)} · ${esc(me.login_id)} · ${esc(me.phone)}</p>
-      <div class="actions">${button('전화번호 변경','verify:CHANGE_PHONE')}${button('로그아웃','logout','danger')}</div>
+      <div class="actions">${button('로그아웃','logout','danger')}</div>
       <form class="form" data-form="settings"><label class="check"><input name="push" type="checkbox" ${me.push_enabled?'checked':''}>푸시 알림 수신 설정</label>
       <small>기기 푸시 발송은 연결 준비 중입니다. 앱 내 알림은 알림함에서 확인할 수 있습니다.</small><div><button class="button">설정 저장</button></div></form></div>`);
     else content=head('페이지를 찾을 수 없습니다.')+'<a class="button" href="#home">홈으로</a>';
@@ -318,13 +299,13 @@ const groupActions={
 const actions={
   login,close:()=>dialog.close(),refresh:render,capture:()=>guarded('capture'),settings:()=>navTo('settings'),
   logout:async()=>{await post('/auth/logout');me=null;dialog.close();navTo(adminMode?'users':'home');},
-  verify:verifyStart,
+  signup,
   record:async id=>recordDetail(samples.find(s=>s.record_id===id)??await api('/records/'+id)),
   notification:async id=>recordDetail(await post('/notifications/'+id+'/open')),
   'read-all':async()=>{await post('/notifications/read');await render();},
   edit:async id=>{const [r,g]=await Promise.all([api('/records/'+id),api('/groups')]);modal('기록 및 공유 수정',recordForm(r,g));},
   'cancel-import':async id=>{await api('/imports/'+id,{method:'DELETE'});await render();},
-  'friend-search':()=>modal('친구 검색',`<form class="form" data-form="friend-search">${field('가입한 전화번호','phone','type="tel" required placeholder="010-1234-5678"')}<button class="button primary">검색</button></form>`),
+  'friend-search':()=>modal('친구 검색',`<form class="form" data-form="friend-search">${field('친구 아이디','login_id','required minlength="3" maxlength="50"')}<button class="button primary">검색</button></form>`),
   'friend-request':async id=>{await post('/friends/request',{user_id:id});dialog.close();toast('친구 요청을 보냈습니다.');await render();},
   'friend-accept':async id=>{await post('/friends/'+id+'/respond',{accept:true});await render();},
   'friend-reject':async id=>{await post('/friends/'+id+'/respond',{accept:false});await render();},
@@ -335,7 +316,6 @@ const actions={
   'copy-invite':async()=>{await navigator.clipboard.writeText($('[name="invite_url"]').value);toast('초대 링크를 복사했습니다.');},
   group:groupDetail,...groupActions,
   'user-page':p=>userResults(getForm('user-search'),Number(p)),user:adminUser,
-  guidance:async id=>{const r=await post('/admin/users/'+id+'/reset-guidance');modal('비밀번호 초기화 안내',`<p class="info">${esc(r.message)}</p>`);},
   restrict:id=>restrictionForm(id,false),release:id=>restrictionForm(id,true)
 };
 function restrictionForm(id,release){
@@ -398,16 +378,7 @@ async function saveRecord(form,formData,values){
 }
 const forms={
   login:async(_f,_d,v)=>{await post('/auth/login',v);await loadSession();dialog.close();await render();await joinFromLink();},
-  'verify-start':async(f,_d,v)=>{const p=f.dataset.purpose;const r=await post('/auth/verify',{...v,purpose:p});verifyCode(p,r.id);},
-  'verify-code':async(f,_d,v)=>{await post('/auth/verify/'+f.dataset.id,v);verifyFinish(f.dataset.purpose,f.dataset.id);},
-  'verify-finish':async(f,_d,v)=>{
-    const p=f.dataset.purpose;
-    const verification=f.dataset.id?{verification_id:f.dataset.id}:{skip_sms:true};
-    const r=await post('/auth/'+({SIGNUP:'signup',FIND_ID:'find-id',RESET_PASSWORD:'reset-password',CHANGE_PHONE:'change-phone'}[p]),{...v,...verification});
-    if(p==='FIND_ID') modal('아이디 확인',`<p class="info">가입한 아이디는 <strong>${esc(r.login_id)}</strong>입니다.</p><div class="actions">${button('로그인','login','primary')}</div>`);
-    else if(p==='CHANGE_PHONE'){dialog.close();await loadSession();await render();toast('전화번호를 변경했습니다.');}
-    else {await loadSession();await render();login();toast(p==='SIGNUP'?'가입이 완료되었습니다.':'새 비밀번호로 로그인해 주세요.');}
-  },
+  signup:async(_f,_d,v)=>{await post('/auth/signup',v);login();toast('가입이 완료되었습니다.');},
   upload:uploadCapture,'save-record':saveRecord,
   ranking:(f,_d,v)=>groupDetail(f.dataset.id,v.metric,v.period),
   'friend-search':async(_f,_d,v)=>{
