@@ -95,18 +95,22 @@ identity.patch('/settings',auth,async(req,res)=>{
 });
 const purposes=['SIGNUP','FIND_ID','RESET_PASSWORD','CHANGE_PHONE'];
 function password(body) {
-  check(typeof body.password==='string' && body.password.length>=8 && body.password.length<=128 &&
-    body.password===body.confirm,'비밀번호는 8자 이상이며 확인 값과 같아야 합니다.');
+  check(typeof body.password==='string' && body.password.length>=8 && body.password.length<=128,
+    '비밀번호는 8자 이상 128자 이하로 입력해 주세요.');
+  check(body.password===body.confirm,'비밀번호와 비밀번호 확인이 일치하지 않습니다.');
   return hash(body.password);
 }
 identity.post('/signup',limit(60000,8),async(req,res)=>{
-  const login=string(req.body.login_id,50,3), name=string(req.body.display_name,100);
-  check(/^[a-zA-Z0-9_.-]+$/.test(login),'아이디는 영문, 숫자, 점, 밑줄, 하이픈을 사용할 수 있습니다.');
+  const login=req.body?.login_id;
+  const name=req.body?.display_name;
+  check(typeof name==='string' && name.trim().length>=1 && name.trim().length<=100,'이름은 1자 이상 100자 이하로 입력해 주세요.');
+  check(typeof login==='string' && login.trim().length>=3 && login.trim().length<=50,'아이디는 3자 이상 50자 이하로 입력해 주세요.');
+  check(/^[a-zA-Z0-9_.-]+$/.test(login.trim()),'아이디는 영문, 숫자, 점, 밑줄, 하이픈만 사용할 수 있습니다.');
   const encoded=await password(req.body);
   const id=randomUUID(), placeholder='no-phone:'+id;
   await transaction(async c=>{
     await c.query(`insert into app_user(user_id,login_id,display_name,password_hash,phone_ciphertext,phone_lookup_hash)
-      values($1,$2,$3,$4,$5,$6)`,[id,login,name,encoded,encrypt(placeholder),lookup(placeholder)]);
+      values($1,$2,$3,$4,$5,$6)`,[id,login.trim(),name.trim(),encoded,encrypt(placeholder),lookup(placeholder)]);
     await c.query('insert into user_setting(user_id,push_enabled) values($1,false)',[id]);
   });
   res.status(201).json({ok:true});

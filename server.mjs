@@ -17,10 +17,15 @@ app.use((req,res,next)=>{
 });
 app.use('/api', express.json({limit:'96kb'}), (req,res,next)=>{
   res.set('Cache-Control','no-store');
+  const protocol=process.env.VERCEL || req.secure ? 'https' : 'http';
+  const requestOrigin=`${protocol}://${req.headers.host}`;
+  const origin=req.headers.origin;
   if (!['GET','HEAD','OPTIONS'].includes(req.method) &&
       (req.headers['sec-fetch-site']==='cross-site' ||
-       (req.headers.origin && req.headers.origin!==(process.env.APP_ORIGIN || `http${req.secure?'s':''}://${req.headers.host}`)))) {
-    return res.status(403).json({message:'요청 출처를 확인해 주세요.'});
+       (origin && origin!==(process.env.APP_ORIGIN || requestOrigin) && !(process.env.VERCEL && origin===requestOrigin)))) {
+    return res.status(403).json({
+      message:'현재 페이지 주소가 요청을 보낼 수 있는 주소와 일치하지 않습니다. 서비스 주소를 브라우저에서 직접 열고 다시 시도해 주세요.'
+    });
   }
   next();
 });
