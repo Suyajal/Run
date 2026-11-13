@@ -39,7 +39,10 @@ async function api(path,{method='GET',body,key}={}){
   if(body && !(body instanceof FormData)) headers['Content-Type']='application/json';
   if(key) headers['Idempotency-Key']=key;
   const res=await fetch('/api'+path,{method,headers,body:body instanceof FormData?body:body?JSON.stringify(body):undefined});
-  const data=await res.json();
+  const data=await res.json().catch(()=>null);
+  if(!data) throw Object.assign(Error(res.status===413
+    ? '이미지가 너무 큽니다. 4 MB 이하의 PNG 또는 JPEG를 선택해 주세요.'
+    : '서버에서 응답을 받지 못했습니다. 잠시 후 다시 시도해 주세요.'),{status:res.status});
   if(!res.ok) throw Object.assign(Error(data.message),{status:res.status,details:data.details});
   return data;
 }
@@ -336,7 +339,11 @@ async function uploadCapture(form,formData){
     if(draft.status==='READY'){
       const groups=await api('/groups');
       if(ticket===generation) main.innerHTML=head('러닝 수치 확인','기록에 저장할 수치와 공유 범위를 확인하세요.')+
-        panel('운동 정보',recordForm({...draft.extracted_values,source_app:draft.source_app},groups,id));
+        panel('운동 정보',(draft.error_code==='OCR_FAILED'
+          ? '<p class="info" role="alert">서버에서 이미지 분석을 완료하지 못했습니다. 운동 수치를 직접 입력하거나 캡처를 다시 올려 주세요.</p>'
+          : Object.keys(draft.extracted_values||{}).length===0
+            ? '<p class="info" role="status">이미지에서 운동 수치를 찾지 못했습니다. 운동 수치를 직접 입력해 주세요.</p>'
+            : '')+recordForm({...draft.extracted_values,source_app:draft.source_app},groups,id));
       return;
     }
     if(draft.status!=='ANALYZING') break;
