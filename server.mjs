@@ -40,5 +40,6 @@ app.use((err,req,res,_next)=>{
   res.status(status).json({request_id:req.requestId,message:err.status && status<500 ? err.message :
     ({409:'이미 등록되어 있거나 상태가 변경되었습니다.',422:'입력값을 확인해 주세요.',413:'이미지는 4 MB 이하로 선택해 주세요.'}[status]||'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'),details:err.details});
 });
-export const server=app.listen(Number(process.env.PORT??3000),process.env.BIND_HOST||'127.0.0.1',()=>console.log(`Suyajal Run · http://127.0.0.1:${server.address().port}`));
+export default app;
+export const server=process.env.VERCEL ? undefined : app.listen(Number(process.env.PORT??3000),process.env.BIND_HOST||'127.0.0.1',()=>console.log(`Suyajal Run · http://127.0.0.1:${server.address().port}`));
 
