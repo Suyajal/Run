@@ -56,6 +56,7 @@ function captureDate(text,samsungDetails){
   if(samsungDetails){
     // A textured background can make the Korean year and month suffixes look like digits or quotes.
     patterns.push(/\b(20\d{2})(?:[년4]|[ \t]+)[ \t]*(0?[1-9]|1[0-2])(?:[월8"”]|[ \t]+)[ \t]*(\d{1,2})[ \t]*일/);
+    patterns.push(/\b(20\d{2})[ \t]+(0?[1-9]|1[0-2])8[ \t]+(\d{1,2})[%일][ \t]*\(/);
   }
   for(const pattern of patterns){
     const match=text.match(pattern);
@@ -66,23 +67,29 @@ function captureDate(text,samsungDetails){
   }
 }
 export async function readCapture(bytes){
-  const worker=await createWorker(process.env.OCR_LANG || 'eng',1,{cachePath:process.env.VERCEL ? tmpdir() : 'ocr-cache'});
+  const worker=await createWorker(process.env.OCR_LANG || 'eng+kor',1,{cachePath:process.env.VERCEL ? tmpdir() : 'ocr-cache'});
   try{
     const {data}=await worker.recognize(bytes);
     const text=data.text.normalize('NFKC');
     const out={};
     const km=text.match(/\b(\d{1,3}(?:[.,]\d{1,3})?)\s*km\b(?!\s*\/\s*h)/i);
-    const duration=text.match(/\b(\d{1,2}):(\d{2}):(\d{2})\b/);
-    const pace=text.match(/\b(\d{1,2})['’′](\d{2})["”″]?\s*\/?\s*km/i);
-    const samsungDetails=/운동\s*상\s*세\s*정\s*보/.test(text) && !!duration && !!pace;
+    const samsungSection=text.split(/운동\s*상\s*세\s*정\s*보/)[1]?.split(/지도|차트/)[0];
+    const samsungDetails=!!samsungSection;
+    const duration=(samsungSection ?? text).match(/\b(\d{1,2}):([0-5]\d):([0-5]\d)\b/);
+    const shortDuration=!duration && (samsungSection ?? text.match(/(?:운동\s*시간|workout time|duration)\s*[:\n]?\s*\d+:\d+/i)?.[0])
+      ?.match(/\b(\d{1,3}):([0-5]\d)\b(?!:)/);
+    const pace=text.match(/\b(\d{1,2})['’′]([0-5]\d)["”″]?\s*\/?\s*km/i) ??
+      samsungSection?.match(/\b(\d{1,2})['’′]([0-5]\d)["”″]/);
     const cadence=text.match(/\b(\d{2,3})[ \t]*(?:spm\b|steps\/min\b|걸음[ \t]*\/[ \t]*분)/i) ??
-      (samsungDetails ? text.match(/^\s*(\d{2,3})[ \t]+(?:sem|s[pr]rn)\b(?=[ \t]+[\d,.]+[ \t]*m\b|[ \t]*$)/im) : null);
-    const heart=text.match(/\b(\d{2,3})\s*bpm\b/i);
+      samsungSection?.match(/^\s*(\d{2,3})[ \t]+(?:sem|s[pr]rn)\b/im);
+    const heart=text.match(/\b(\d{2,3})\s*bpm\b/i) ??
+      samsungSection?.match(/^\s*(\d{2,3})[ \t]+ber\b/im);
     const speed=text.match(/\b(\d{1,3}(?:[.,]\d+)?)\s*km\/h\b/i);
     const elevation=text.match(/(?:elevation gain|고도\s*상승)\s*[:\n]?\s*(\d{1,5}(?:[.,]\d+)?)\s*m\b/i);
     const day=captureDate(text,samsungDetails);
     if(km) out.distance_m=Math.round(Number(km[1].replace(',','.'))*1000);
     if(duration) out.duration_sec=+duration[1]*3600 + +duration[2]*60 + +duration[3];
+    else if(shortDuration) out.duration_sec=+shortDuration[1]*60 + +shortDuration[2];
     if(pace) out.avg_pace_sec_km=+pace[1]*60 + +pace[2];
     if(cadence) out.avg_cadence_spm=+cadence[1];
     if(heart) out.avg_heart_rate_bpm=+heart[1];
