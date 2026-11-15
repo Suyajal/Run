@@ -86,13 +86,14 @@ function stats(cards){
     <div><div class="stat-label">${label}</div><strong class="number">${value}${unit?`<small>${unit}</small>`:''}</strong></div></div>`).join('')}</div>`;
 }
 async function home(){
-  const [data,groups]=me?await Promise.all([api('/records'),api('/groups')]):[demo,[]];
+  const [data,groups,recentFriends]=me?await Promise.all([api('/records'),api('/groups'),api('/friends/recent-records')]):[demo,[],[]];
   const top=data.totals, mine=groups.filter(g=>g.joined).slice(0,3);
   return head('러닝 대시보드',me?`${esc(me.display_name)}님의 러닝 기록과 그룹 활동`:'샘플 기록으로 대시보드를 둘러보세요.',button('기록 등록','capture','primary','plus'))+
     `<section class="hero"><div class="hero-body"><div class="eyebrow">SUYAJAL RUN</div><h2>오늘의 러닝을<br>기록해 보세요</h2><p>삼성 헬스나 Apple Fitness의 러닝 화면을 올려보세요.</p>${button('캡처 업로드','capture','lime','upload')}</div></section>`+
     stats([['누적 거리',km(top.distance),'km','route'],['러닝 기록',num(top.count),'회','run'],['평균 페이스',top.distance?pace(top.seconds*1000/top.distance):'—','/km','clock']])+
     `<div class="home-grid">${panel('최근 러닝',recordList(data.items.slice(0,4)), '<a class="text-link" href="#records">모든 기록 →</a>')}
     <div>${panel('최근 7일 거리',chart(data.week),'<span class="chart-caption">km</span>')}
+    ${recentFriends.length?panel('최근 친구 기록',recentFriends.map(f=>friendRow(f,true)).join('')):''}
     <div class="panel stack"><div class="panel-title"><h2>내 그룹</h2><a class="text-link" href="#groups">그룹 보기 →</a></div>
     ${mine.length?groupRows(mine):me?empty('가입한 그룹이 없습니다.'):'<div class="row"><span class="row-icon">'+icon('groups')+'</span><span class="row-main"><strong>수야잘 러닝 크루</strong><small>샘플 그룹</small></span><span class="pill">주간 순위</span></div>'}</div></div></div>`;
 }
@@ -187,10 +188,15 @@ async function friendRecords(id){
   modal(esc(data.display_name)+'님의 러닝 기록',
     recordList(data.items,'friend-record','친구에게 공유된 러닝 기록이 없습니다.'));
 }
+function friendRow(f,recent=false){
+  return `<button class="row" data-action="friend-records:${esc(f.user_id)}">
+    <span class="avatar">${esc(f.display_name[0])}</span>
+    <span class="row-main"><strong>${esc(f.display_name)}${recent?' <span class="pill">New</span>':''}</strong>
+    ${recent?`<small>${esc(f.exercise_date)} · ${km(f.distance_m)} km</small>`:''}</span>
+    ${recent?'':'<span class="pill">연결됨</span>'}${icon('arrow')}</button>`;
+}
 function friendsPage(items){
-  const connected=items.filter(f=>f.status==='ACCEPTED').map(f=>`<button class="row" data-action="friend-records:${esc(f.user_id)}">
-    <span class="avatar">${esc(f.display_name[0])}</span><span class="row-main"><strong>${esc(f.display_name)}</strong></span>
-    <span class="pill">연결됨</span>${icon('arrow')}</button>`).join('');
+  const connected=items.filter(f=>f.status==='ACCEPTED').map(f=>friendRow(f)).join('');
   const section=(title,subset)=>panel(title,subset.length?subset.map(f=>`<div class="row"><span class="avatar">${esc(f.display_name[0])}</span>
     <span class="row-main"><strong>${esc(f.display_name)}</strong></span>
     ${button('수락','friend-accept:'+f.relation_id,'primary')+button('거절','friend-reject:'+f.relation_id)}</div>`).join(''):empty('목록이 비어 있습니다.'));

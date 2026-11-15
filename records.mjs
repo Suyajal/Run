@@ -15,6 +15,20 @@ const recordSelect=`r.record_id,r.user_id,u.display_name,r.source_app,r.exercise
  r.avg_pace_sec_km,r.avg_speed_kmh,r.avg_cadence_spm,r.avg_heart_rate_bpm,r.elevation_gain_m,r.version`;
 const acceptedFriend=owner=>`exists(select 1 from friend_relation f where f.user_low_id=least(${owner},$2)
   and f.user_high_id=greatest(${owner},$2) and f.status='ACCEPTED')`;
+records.get('/friends/recent-records',async(req,res)=>{
+  const items=await rows(db,`select u.user_id,u.display_name,r.exercise_date::text,r.distance_m
+    from friend_relation f
+    join app_user u on u.user_id=case when f.user_low_id=$1 then f.user_high_id else f.user_low_id end
+    join lateral (
+      select exercise_date,distance_m,created_at from running_record
+      where user_id=u.user_id and share_to_friends and deleted_at is null
+        and created_at>=now()-interval '7 days'
+      order by created_at desc,record_id desc limit 1
+    ) r on true
+    where $1 in(f.user_low_id,f.user_high_id) and f.status='ACCEPTED' and not ${restriction('u.user_id')}
+    order by r.created_at desc,u.user_id`,[req.user.user_id]);
+  res.json(items);
+});
 records.get('/friends/:id/records',async(req,res)=>{
   const items=await rows(db,`select u.display_name,r.record_id,r.source_app,r.exercise_date::text,r.distance_m,r.duration_sec
     from app_user u left join running_record r on r.user_id=u.user_id
