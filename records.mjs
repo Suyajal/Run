@@ -13,6 +13,17 @@ const sources=['SAMSUNG_HEALTH','APPLE_FITNESS'];
 const fields=['exercise_date','distance_m','duration_sec','avg_pace_sec_km','avg_speed_kmh','avg_cadence_spm','avg_heart_rate_bpm','elevation_gain_m'];
 const recordSelect=`r.record_id,r.user_id,u.display_name,r.source_app,r.exercise_date::text,r.distance_m,r.duration_sec,
  r.avg_pace_sec_km,r.avg_speed_kmh,r.avg_cadence_spm,r.avg_heart_rate_bpm,r.elevation_gain_m,r.version`;
+const acceptedFriend=owner=>`exists(select 1 from friend_relation f where f.user_low_id=least(${owner},$2)
+  and f.user_high_id=greatest(${owner},$2) and f.status='ACCEPTED')`;
+records.get('/friends/:id/records',async(req,res)=>{
+  const items=await rows(db,`select u.display_name,r.record_id,r.source_app,r.exercise_date::text,r.distance_m,r.duration_sec
+    from app_user u left join running_record r on r.user_id=u.user_id
+      and r.deleted_at is null and r.share_to_friends
+    where u.user_id=$1 and ${acceptedFriend('u.user_id')} and not ${restriction('u.user_id')}
+    order by r.exercise_date desc,r.created_at desc`,[uuid(req.params.id),req.user.user_id]);
+  check(items.length,'친구의 러닝 기록을 볼 수 없습니다.',404);
+  res.json({display_name:items[0].display_name,items:items.filter(r=>r.record_id)});
+});
 records.get('/records',async(req,res)=>{
   const id=req.user.user_id;
   const items=await rows(db,`select ${recordSelect},r.share_to_friends from running_record r join app_user u using(user_id)
@@ -31,8 +42,7 @@ async function accessible(c,id,uid) {
     from running_record r join app_user u using(user_id)
     where r.record_id=$1 and r.deleted_at is null and (r.user_id=$2 or
       (not ${restriction('r.user_id')} and (
-        (r.share_to_friends and exists(select 1 from friend_relation f where f.user_low_id=least(r.user_id,$2)
-          and f.user_high_id=greatest(r.user_id,$2) and f.status='ACCEPTED'))
+        (r.share_to_friends and ${acceptedFriend('r.user_id')})
         or exists(select 1 from record_group_share s join group_member a on a.group_id=s.group_id and a.user_id=r.user_id
           join group_member b on b.group_id=s.group_id and b.user_id=$2
           where s.record_id=r.record_id and a.status='ACTIVE' and b.status='ACTIVE'))))`,[id,uid]);

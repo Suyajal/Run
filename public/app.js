@@ -65,10 +65,10 @@ const samples=[
 ];
 const demo={items:samples,totals:{count:8,distance:48600,seconds:17542},
   week:[4200,0,5100,3150,0,6200,0].map((distance,i)=>({day:'2026-11-'+String(6+i).padStart(2,'0'),distance}))};
-function recordList(items){
-  return items.length?items.map(r=>`<button class="row" data-action="record:${esc(r.record_id)}"><span class="row-icon">${icon('run')}</span>
+function recordList(items,action='record',emptyMessage='등록한 러닝 기록이 없습니다.'){
+  return items.length?items.map(r=>`<button class="row" data-action="${action}:${esc(r.record_id)}"><span class="row-icon">${icon('run')}</span>
     <span class="row-main"><strong>${source(r.source_app)}</strong><small>${esc(r.exercise_date)} · ${duration(r.duration_sec)}</small></span>
-    <span class="row-score number">${km(r.distance_m)} <small>km</small></span>${icon('arrow')}</button>`).join(''):empty('등록한 러닝 기록이 없습니다.');
+    <span class="row-score number">${km(r.distance_m)} <small>km</small></span>${icon('arrow')}</button>`).join(''):empty(emptyMessage);
 }
 function chart(week){
   const high=Math.max(4000,Math.ceil(Math.max(...week.map(r=>Number(r.distance)))/2000)*2000);
@@ -115,7 +115,7 @@ function signup(){
     ${field('비밀번호 확인','confirm','type="password" required minlength="8" maxlength="128" autocomplete="new-password"')}
     <button class="button primary">가입하기</button></form>`);
 }
-function recordDetail(record){
+function recordDetail(record,backAction){
   const format=[v=>v,v=>km(v)+' km',v=>`${Math.floor(v/3600)}시간 ${Math.floor(v/60)%60}분 ${v%60}초`,
     v=>`${Math.floor(Math.round(v)/60)}분 ${Math.round(v)%60}초 /km`,v=>num(v,1)+' km/h',v=>num(v,0)+' spm',v=>num(v,0)+' bpm',v=>num(v,1)+' m'];
   const origins={READ:'화면 인식',MANUAL:'직접 입력',MISSING:'값 없음',CALCULATED:'자동 계산'};
@@ -123,7 +123,8 @@ function recordDetail(record){
     <div class="detail-grid">${details.map(([key,label],i)=>`<div><small>${label}</small><strong>${record[key]==null?'—':esc(format[i](record[key]))}</strong>
       ${record.meta?.some(m=>m.field_code===key)?`<span>${origins[record.meta.find(m=>m.field_code===key).value_origin]}</span>`:''}</div>`).join('')}</div>
     ${record.has_capture?'<details><summary>업로드한 원본 사진</summary><img class="record-capture" loading="lazy" src="/api/records/'+encodeURIComponent(record.record_id)+'/capture" alt="업로드한 러닝 캡처 원본"></details>':''}
-    ${me&&record.user_id===me.user_id?button('기록 및 공유 수정','edit:'+record.record_id,'primary'):''}</div>`);
+    ${me&&record.user_id===me.user_id?button('기록 및 공유 수정','edit:'+record.record_id,'primary'):''}
+    ${backAction?button('기록 목록으로',backAction):''}</div>`);
 }
 function timeFields(legend,prefix,value,withHours){
   const part=(label,name,amount,options='')=>field(label,prefix+'_'+name,
@@ -181,13 +182,20 @@ async function groupDetail(id,metric='distance',period='week'){
     ${g.joined?`<details><summary>전체 그룹원 (${g.members.length})</summary><div>${g.members.map(m=>`<div class="row">${esc(m.display_name)}</div>`).join('')}</div></details>`:''}
     <div class="actions">${!g.joined?button('그룹 가입','join:'+id,'primary'):owner?button('초대 링크 만들기','invite:'+id,'primary')+button('초대 모두 폐기','revoke-invites:'+id):button('그룹 탈퇴','leave:'+id,'danger')}</div></div>`);
 }
+async function friendRecords(id){
+  const data=await api('/friends/'+id+'/records');
+  modal(esc(data.display_name)+'님의 러닝 기록',
+    recordList(data.items,'friend-record','친구에게 공유된 러닝 기록이 없습니다.'));
+}
 function friendsPage(items){
+  const connected=items.filter(f=>f.status==='ACCEPTED').map(f=>`<button class="row" data-action="friend-records:${esc(f.user_id)}">
+    <span class="avatar">${esc(f.display_name[0])}</span><span class="row-main"><strong>${esc(f.display_name)}</strong></span>
+    <span class="pill">연결됨</span>${icon('arrow')}</button>`).join('');
   const section=(title,subset)=>panel(title,subset.length?subset.map(f=>`<div class="row"><span class="avatar">${esc(f.display_name[0])}</span>
     <span class="row-main"><strong>${esc(f.display_name)}</strong></span>
-    ${f.status==='ACCEPTED'?'<span class="pill">연결됨</span>':f.requested_by===me.user_id?'<span class="pill">수락 대기</span>':
-    button('수락','friend-accept:'+f.relation_id,'primary')+button('거절','friend-reject:'+f.relation_id)}</div>`).join(''):empty('목록이 비어 있습니다.'));
+    ${button('수락','friend-accept:'+f.relation_id,'primary')+button('거절','friend-reject:'+f.relation_id)}</div>`).join(''):empty('목록이 비어 있습니다.'));
   return head('친구','전화번호로 친구를 찾아 러닝 기록을 공유하세요.',button('친구 검색','friend-search','primary','plus'))+
-    `<div class="home-grid">${section('연결된 친구',items.filter(f=>f.status==='ACCEPTED'))}<div>${section('받은 요청',items.filter(f=>f.status==='PENDING'&&f.requested_by!==me.user_id))}
+    `<div class="home-grid">${panel('연결된 친구',connected||empty('목록이 비어 있습니다.'))}<div>${section('받은 요청',items.filter(f=>f.status==='PENDING'&&f.requested_by!==me.user_id))}
     <div class="panel stack"><div class="panel-title"><h2>보낸 요청</h2></div>${items.filter(f=>f.status==='PENDING'&&f.requested_by===me.user_id).map(f=>`<div class="row"><span class="row-main">${esc(f.display_name)}</span><span class="pill">수락 대기</span></div>`).join('')||empty('보낸 요청이 없습니다.')}</div></div></div>`;
 }
 const authWall=()=>head(titles[page()]||'Suyajal Run')+panel('로그인이 필요합니다',`<div class="form"><p class="muted">${esc(bootError||'로그인 후 이 기능을 이용할 수 있습니다.')}</p><div>${button('로그인','login','primary')}</div></div>`);
@@ -305,6 +313,11 @@ const actions={
   logout:async()=>{await post('/auth/logout');me=null;dialog.close();navTo(adminMode?'users':'home');},
   signup,
   record:async id=>recordDetail(samples.find(s=>s.record_id===id)??await api('/records/'+id)),
+  'friend-records':friendRecords,
+  'friend-record':async id=>{
+    const record=await api('/records/'+id);
+    recordDetail(record,'friend-records:'+record.user_id);
+  },
   notification:async id=>recordDetail(await post('/notifications/'+id+'/open')),
   'read-all':async()=>{await post('/notifications/read');await render();},
   edit:async id=>{const [r,g]=await Promise.all([api('/records/'+id),api('/groups')]);modal('기록 및 공유 수정',recordForm(r,g));},
