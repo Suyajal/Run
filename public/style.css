@@ -14,3 +14,5 @@ dialog{border:1px solid var(--line);border-radius:15px;max-width:min(550px,calc(
 .time-parts{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:8px}
 
 .record-capture { display: block; max-width: 100%; height: auto; margin-top: 0.75rem; }
+.record-comments .comment{border-top:1px solid var(--line);padding:10px 0;font-size:14px}
+.record-comments .comment p{margin-top:5px;white-space:pre-wrap;overflow-wrap:anywhere}

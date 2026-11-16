@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import { createWorker } from 'tesseract.js';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { db, one, rows, transaction, check, restriction, uuid, date } from './db.mjs';
+import { db, one, rows, transaction, check, restriction, uuid, date, string } from './db.mjs';
 import { digest } from './identity.mjs';
 
 export const records=Router();
@@ -15,6 +15,8 @@ const recordSelect=`r.record_id,r.user_id,u.display_name,r.source_app,r.exercise
  r.avg_pace_sec_km,r.avg_speed_kmh,r.avg_cadence_spm,r.avg_heart_rate_bpm,r.elevation_gain_m,r.version`;
 const acceptedFriend=owner=>`exists(select 1 from friend_relation f where f.user_low_id=least(${owner},$2)
   and f.user_high_id=greatest(${owner},$2) and f.status='ACCEPTED')`;
+const recentComment = `exists(select 1 from record_comment c
+  where c.record_id=r.record_id and c.created_at>now()-interval '24 hours') as has_new_comment`;
 records.get('/friends/recent-records',async(req,res)=>{
   const items=await rows(db,`select u.user_id,u.display_name,r.exercise_date::text,r.distance_m
     from friend_relation f
@@ -30,7 +32,7 @@ records.get('/friends/recent-records',async(req,res)=>{
   res.json(items);
 });
 records.get('/friends/:id/records',async(req,res)=>{
-  const items=await rows(db,`select u.display_name,r.record_id,r.source_app,r.exercise_date::text,r.distance_m,r.duration_sec
+  const items=await rows(db,`select u.display_name,r.record_id,r.source_app,r.exercise_date::text,r.distance_m,r.duration_sec,${recentComment}
     from app_user u left join running_record r on r.user_id=u.user_id
       and r.deleted_at is null and r.share_to_friends
     where u.user_id=$1 and ${acceptedFriend('u.user_id')} and not ${restriction('u.user_id')}
@@ -40,7 +42,7 @@ records.get('/friends/:id/records',async(req,res)=>{
 });
 records.get('/records',async(req,res)=>{
   const id=req.user.user_id;
-  const items=await rows(db,`select ${recordSelect},r.share_to_friends from running_record r join app_user u using(user_id)
+  const items=await rows(db,`select ${recordSelect},r.share_to_friends,${recentComment} from running_record r join app_user u using(user_id)
     where r.user_id=$1 and r.deleted_at is null order by r.exercise_date desc,r.created_at desc limit 100`,[id]);
   const totals=await one(db,`select count(*)::int count,coalesce(sum(distance_m),0) distance,coalesce(sum(duration_sec),0) seconds
     from running_record where user_id=$1 and deleted_at is null`,[id]);
@@ -51,16 +53,33 @@ records.get('/records',async(req,res)=>{
     group by 1 order by 1`,[id]);
   res.json({items,totals,week:month});
 });
+const recordAccess = `r.record_id=$1 and r.deleted_at is null and (r.user_id=$2 or
+  (not ${restriction('r.user_id')} and (
+    (r.share_to_friends and ${acceptedFriend('r.user_id')})
+    or exists(select 1 from record_group_share s join group_member a on a.group_id=s.group_id and a.user_id=r.user_id
+      join group_member b on b.group_id=s.group_id and b.user_id=$2
+      where s.record_id=r.record_id and a.status='ACTIVE' and b.status='ACTIVE'))))`;
 async function accessible(c,id,uid) {
   return one(c,`select ${recordSelect},case when r.user_id=$2 then r.share_to_friends end share_to_friends
-    from running_record r join app_user u using(user_id)
-    where r.record_id=$1 and r.deleted_at is null and (r.user_id=$2 or
-      (not ${restriction('r.user_id')} and (
-        (r.share_to_friends and ${acceptedFriend('r.user_id')})
-        or exists(select 1 from record_group_share s join group_member a on a.group_id=s.group_id and a.user_id=r.user_id
-          join group_member b on b.group_id=s.group_id and b.user_id=$2
-          where s.record_id=r.record_id and a.status='ACTIVE' and b.status='ACTIVE'))))`,[id,uid]);
+    from running_record r join app_user u using(user_id) where ${recordAccess}`,[id,uid]);
 }
+async function recordComments(id,uid) {
+  return rows(db,`select c.comment_id,c.body,c.created_at,u.display_name
+    from running_record r join record_comment c using(record_id) join app_user u on u.user_id=c.user_id
+    where ${recordAccess} order by c.created_at,c.comment_id`,[id,uid]);
+}
+records.post('/records/:id/comments',async(req,res)=>{
+  const id=uuid(req.params.id), uid=req.user.user_id;
+  const body=string(req.body?.body,500);
+  const comment=await one(db,`with inserted as (
+    insert into record_comment (record_id,user_id,comment_id,body)
+    select r.record_id,$2,$3,$4 from running_record r where ${recordAccess}
+    returning comment_id,user_id,body,created_at
+  ) select comment_id,body,created_at,display_name from inserted join app_user using(user_id)`,
+  [id,uid,randomUUID(),body]);
+  check(comment,'기록을 볼 수 없습니다.',404);
+  res.status(201).json(comment);
+});
 records.get('/records/:id',async(req,res)=>{
   const id=uuid(req.params.id), uid=req.user.user_id;
   const item=await accessible(db,id,uid);
@@ -71,6 +90,7 @@ records.get('/records/:id',async(req,res)=>{
     item.meta=await rows(db,'select field_code,value_origin,recognized_value from record_field_meta where record_id=$1',[id]);
     item.groups=(await rows(db,'select group_id from record_group_share where record_id=$1',[id])).map(r=>r.group_id);
   }
+  item.comments=await recordComments(item.record_id,uid);
   res.json(item);
 });
 let active=0;
@@ -296,6 +316,7 @@ records.post('/notifications/:id/open',async(req,res)=>{
   const item=await accessible(db,n.record_id,uid);
   check(item,'현재 공유 중인 기록을 볼 수 없습니다.',404);
   await db.query('update notification set read_at=coalesce(read_at,now()),opened_at=coalesce(opened_at,now()) where notification_id=$1',[id]);
+  item.comments=await recordComments(item.record_id,uid);
   res.json(item);
 });
 

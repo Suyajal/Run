@@ -65,10 +65,17 @@ const samples=[
 ];
 const demo={items:samples,totals:{count:8,distance:48600,seconds:17542},
   week:[4200,0,5100,3150,0,6200,0].map((distance,i)=>({day:'2026-11-'+String(6+i).padStart(2,'0'),distance}))};
+const newCommentBadge='<span class="pill comment-new" aria-label="최근 24시간 내 새 댓글">New</span>';
+function commentRow(comment){
+  return `<li class="comment">
+    <strong>${esc(comment.display_name)}</strong> <small>${esc(when(comment.created_at))}</small>
+    <p>${esc(comment.body)}</p>
+  </li>`;
+}
 function recordList(items,action='record',emptyMessage='등록한 러닝 기록이 없습니다.'){
-  return items.length?items.map(r=>`<button class="row" data-action="${action}:${esc(r.record_id)}"><span class="row-icon">${icon('run')}</span>
+  return items.length?items.map(r=>`<button class="row" data-action="${action}:${esc(r.record_id)}" data-record-id="${esc(r.record_id)}"><span class="row-icon">${icon('run')}</span>
     <span class="row-main"><strong>${source(r.source_app)}</strong><small>${esc(r.exercise_date)} · ${duration(r.duration_sec)}</small></span>
-    <span class="row-score number">${km(r.distance_m)} <small>km</small></span>${icon('arrow')}</button>`).join(''):empty(emptyMessage);
+    ${r.has_new_comment?newCommentBadge:''}<span class="row-score number">${km(r.distance_m)} <small>km</small></span>${icon('arrow')}</button>`).join(''):empty(emptyMessage);
 }
 function chart(week){
   const high=Math.max(4000,Math.ceil(Math.max(...week.map(r=>Number(r.distance)))/2000)*2000);
@@ -125,6 +132,17 @@ function recordDetail(record,backAction){
       ${record.meta?.some(m=>m.field_code===key)?`<span>${origins[record.meta.find(m=>m.field_code===key).value_origin]}</span>`:''}</div>`).join('')}</div>
     ${record.has_capture?'<details><summary>업로드한 원본 사진</summary><img class="record-capture" loading="lazy" src="/api/records/'+encodeURIComponent(record.record_id)+'/capture" alt="업로드한 러닝 캡처 원본"></details>':''}
     ${me&&record.user_id===me.user_id?button('기록 및 공유 수정','edit:'+record.record_id,'primary'):''}
+    ${Array.isArray(record.comments)?`<section class="form" aria-labelledby="record-comments-heading">
+      <h3 id="record-comments-heading">댓글</h3>
+      <div aria-live="polite">
+        ${record.comments.length?'':empty('아직 댓글이 없습니다.')}
+        <ul class="list record-comments">${record.comments.map(commentRow).join('')}</ul>
+      </div>
+      <form class="form" data-form="record-comment" data-id="${esc(record.record_id)}">
+        <label class="field">댓글 내용<textarea name="body" required maxlength="500" rows="3"></textarea></label>
+        <div><button class="button primary">댓글 등록</button></div>
+      </form>
+    </section>`:''}
     ${backAction?button('기록 목록으로',backAction):''}</div>`);
 }
 function timeFields(legend,prefix,value,withHours){
@@ -407,6 +425,19 @@ const forms={
   login:async(_f,_d,v)=>{await post('/auth/login',v);await loadSession();dialog.close();await render();await joinFromLink();},
   signup:async(_f,_d,v)=>{await post('/auth/signup',v);login();toast('가입이 완료되었습니다.');},
   upload:uploadCapture,'save-record':saveRecord,
+  'record-comment':async(f,_d,v)=>{
+    const id=f.dataset.id;
+    const comment=await post('/records/'+encodeURIComponent(id)+'/comments',{body:v.body});
+    const row=document.querySelector(`[data-record-id="${CSS.escape(id)}"]`);
+    if(row&&!row.querySelector('.comment-new')){
+      row.querySelector('.row-score').insertAdjacentHTML('beforebegin',newCommentBadge);
+    }
+    if(!dialog.open||!f.isConnected) return;
+    const list=dialog.querySelector('.record-comments');
+    list.previousElementSibling?.remove();
+    list.insertAdjacentHTML('beforeend',commentRow(comment));
+    f.reset();
+  },
   ranking:(f,_d,v)=>groupDetail(f.dataset.id,v.metric,v.period),
   'friend-search':async(_f,_d,v)=>{
     const r=await post('/friends/search',v);

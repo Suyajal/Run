@@ -22,7 +22,7 @@
 
 이름, 아이디, 비밀번호로 가입합니다. 친구는 로그인 아이디로 검색합니다. 문자 기반 계정 복구는 제공하지 않습니다.
 
-기존 DB에 배포하기 전에 `migrations/001-optional-phone-verification.sql`을 한 번 실행합니다.
+기존 DB에 배포하기 전에 `migrations/`의 SQL 파일을 번호 순서대로 적용합니다. 러닝 기록 댓글 기능에는 `migrations/003-record-comments.sql`이 필요합니다.
 
 관리자 화면은 현재 `public.admin_access`가 `ACTIVE`인 계정으로 로그인하면 열립니다. 운영 관리자가 지정한 계정의 권한을 해당 테이블에서 관리합니다. 앱은 관리자 권한을 자동으로 부여하지 않습니다.
 
