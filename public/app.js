@@ -164,10 +164,10 @@ function timeFields(legend,prefix,value,withHours){
     ${part('초','seconds',seconds,withHours?'max="59"':'max="59.99999999" step="any"')}
     </div></fieldset>`;
 }
-const captureIntro=()=>head('러닝 기록 등록','캡처를 분석하거나 운동 수치를 직접 입력하세요.')+
+const captureIntro=()=>head('러닝 기록 등록','캡처를 분석하거나 삼성 헬스에서 가져오거나 직접 입력하세요.')+
   panel('러닝 화면 선택',`<form class="upload" data-form="upload"><span class="row-icon">${icon('upload')}</span>
   <strong>삼성 헬스 또는 Apple Fitness</strong><p>PNG 또는 JPEG · 최대 4 MB</p><input aria-label="러닝 캡처 이미지" type="file" name="capture" accept="image/png,image/jpeg" required>
-  <div class="actions"><button class="button primary">분석 시작</button>${button('사용자 입력','manual-record')}</div></form>`);
+  <div class="actions"><button class="button primary">분석 시작</button>${button('삼성헬스 연동','samsung-health')}${button('사용자 입력','manual-record')}</div></form>`);
 function recordForm(r,groups,importId){
   const meta=r.meta||[], isNew=!r.record_id;
   const value=key=>meta.some(m=>m.field_code===key && m.value_origin==='CALCULATED')?'':r[key]??'';
@@ -370,6 +370,52 @@ const actions={
   },
   'read-all':async()=>{await post('/notifications/read');await render();},
   edit:async id=>{const [r,g]=await Promise.all([api('/records/'+id),api('/groups')]);modal('기록 및 공유 수정',recordForm(r,g));},
+  'samsung-health':()=>{
+    if(!me){login();return;}
+    if(!navigator.userAgent.includes('SuyajalRunHealth/1')){
+      modal('삼성헬스 연동','<p class="info">삼성 헬스 기록을 가져오려면 Health Connect를 지원하는 Suyajal Run Android 앱에서 이 화면을 열어 주세요.</p>');
+      return;
+    }
+    const ticket=++generation;
+    modal('삼성헬스 연동','<p class="info" role="status">삼성 헬스 러닝 기록을 불러오는 중입니다.</p>');
+    const receive=event=>{
+      if(typeof event.data!=='string') return;
+      let result;
+      try{result=JSON.parse(event.data);}catch{return;}
+      if(result?.suyajalHealthRequest!==ticket) return;
+      cleanup();
+      if(ticket!==generation||!dialog.open) return;
+      if(result.error||!result.runs?.length){
+        modal('삼성헬스 연동',`<p class="info">${esc(result.error||'최근 30일간 가져올 러닝 기록이 없습니다. 삼성 헬스 설정에서 Health Connect에 운동과 거리 쓰기를 허용한 뒤 삼성 헬스를 다시 열어 주세요.')}</p>`);
+        return;
+      }
+      modal('삼성헬스 연동',`<p class="info">최근 30일간의 러닝 기록 중 등록할 기록을 선택하세요.</p><div class="form">${result.runs.map((run,index)=>
+        `<button type="button" class="button" data-health-run="${index}">${esc(when(run.start))} · ${duration(run.duration_sec)} · ${run.distance_m?km(run.distance_m)+' km':'거리 직접 입력'}</button>`).join('')}</div>`);
+      dialog.querySelectorAll('[data-health-run]').forEach(control=>control.addEventListener('click',async()=>{
+        control.disabled=true;
+        try{
+          const run=result.runs[Number(control.dataset.healthRun)];
+          const groups=await api('/groups');
+          if(ticket!==generation||!dialog.open||!control.isConnected) return;
+          dialog.close();
+          showRecordForm({...run,exercise_date:run.date,source_app:'SAMSUNG_HEALTH'},groups);
+        }catch(error){toast(error.message);}
+        finally{control.disabled=false;}
+      }));
+    };
+    const cleanup=()=>{
+      window.removeEventListener('message',receive);
+      dialog.removeEventListener('close',cleanup);
+      clearTimeout(timeout);
+    };
+    const timeout=setTimeout(()=>{
+      cleanup();
+      if(ticket===generation&&dialog.open) modal('삼성헬스 연동','<p class="info">기록을 불러오지 못했습니다. 다시 시도해 주세요.</p>');
+    },120000);
+    window.addEventListener('message',receive);
+    dialog.addEventListener('close',cleanup);
+    location.href='suyajal-health://runs/'+ticket;
+  },
   'manual-record':async()=>{
     if(!me){login();return;}
     const ticket=++generation;
