@@ -1,7 +1,16 @@
 {
+  "headers": [
+    {
+      "source": "/downloads/SuyajalRun-1.0.0.apk",
+      "headers": [
+        { "key": "Content-Type", "value": "application/vnd.android.package-archive" },
+        { "key": "Content-Disposition", "value": "attachment; filename=\"SuyajalRun-1.0.0.apk\"" }
+      ]
+    }
+  ],
   "functions": {
     "server.mjs": {
-      "includeFiles": "{node_modules/tesseract.js/src/worker-script/**,node_modules/tesseract.js-core/**}"
+      "includeFiles": "{node_modules/tesseract.js/src/worker-script/**,node_modules/tesseract.js-core/**,public/downloads/*.apk}"
     }
   }
 }
