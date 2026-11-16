@@ -53,14 +53,17 @@ records.get('/records',async(req,res)=>{
     group by 1 order by 1`,[id]);
   res.json({items,totals,week:month});
 });
+const friendShare = `r.share_to_friends and ${acceptedFriend('r.user_id')}`;
+const captureAccess = `(r.user_id=$2 or (${friendShare} and not ${restriction('r.user_id')}))`;
 const recordAccess = `r.record_id=$1 and r.deleted_at is null and (r.user_id=$2 or
   (not ${restriction('r.user_id')} and (
-    (r.share_to_friends and ${acceptedFriend('r.user_id')})
+    (${friendShare})
     or exists(select 1 from record_group_share s join group_member a on a.group_id=s.group_id and a.user_id=r.user_id
       join group_member b on b.group_id=s.group_id and b.user_id=$2
       where s.record_id=r.record_id and a.status='ACTIVE' and b.status='ACTIVE'))))`;
 async function accessible(c,id,uid) {
-  return one(c,`select ${recordSelect},case when r.user_id=$2 then r.share_to_friends end share_to_friends
+  return one(c,`select ${recordSelect},case when r.user_id=$2 then r.share_to_friends end share_to_friends,
+    (r.image_base64 is not null and ${captureAccess}) as has_capture
     from running_record r join app_user u using(user_id) where ${recordAccess}`,[id,uid]);
 }
 async function recordComments(id,uid) {
@@ -86,8 +89,6 @@ records.get('/records/:id',async(req,res)=>{
   const item=await accessible(db,id,uid);
   check(item,'기록을 볼 수 없습니다.',404);
   if(item.user_id===uid){
-    const capture=await one(db,'select image_base64 is not null as available from running_record where record_id=$1',[id]);
-    item.has_capture=!!capture?.available;
     item.meta=await rows(db,'select field_code,value_origin,recognized_value from record_field_meta where record_id=$1',[id]);
     item.groups=(await rows(db,'select group_id from record_group_share where record_id=$1',[id])).map(r=>r.group_id);
   }
@@ -96,8 +97,8 @@ records.get('/records/:id',async(req,res)=>{
 });
 let active=0;
 records.get('/records/:id/capture',async(req,res)=>{
-  const capture=await one(db,`select image_base64 from running_record
-    where record_id=$1 and user_id=$2 and deleted_at is null and image_base64 is not null`,
+  const capture=await one(db,`select r.image_base64 from running_record r
+    where r.record_id=$1 and r.deleted_at is null and r.image_base64 is not null and ${captureAccess}`,
     [uuid(req.params.id),req.user.user_id]);
   check(capture,'볼 수 있는 원본 사진이 없습니다.',404);
   const image=Buffer.from(capture.image_base64,'base64');
@@ -246,6 +247,18 @@ async function saveMeta(c,id,values,calculated,recognized={},previous=[]){
       value_origin=excluded.value_origin,needs_review=false,updated_at=now()`,[id,field,origin,original===null?null:String(original)]);
   }
 }
+async function notifyRecordShares(c,id,uid,shareToFriends){
+  await c.query(`insert into notification(notification_id,recipient_user_id,actor_user_id,type,record_id,event_key)
+    select gen_random_uuid(),recipient,$1::uuid,'NEW_RECORD',$2::uuid,'new_record:'||($2::uuid)::text
+    from (
+      select case when f.user_low_id=$1 then f.user_high_id else f.user_low_id end as recipient
+      from friend_relation f where $3::boolean and $1 in(f.user_low_id,f.user_high_id) and f.status='ACCEPTED'
+      union
+      select m.user_id from record_group_share s join group_member m using(group_id)
+      where s.record_id=$2 and m.status='ACTIVE' and m.user_id<>$1
+    ) recipients
+    on conflict (recipient_user_id,event_key) do nothing`,[uid,id,shareToFriends]);
+}
 records.post('/records',async(req,res)=>{
   const body=req.body, uid=req.user.user_id, key=uuid(req.get('Idempotency-Key'));
   const imp=Object.hasOwn(body,'import_id')?uuid(body.import_id):null;
@@ -273,12 +286,7 @@ records.post('/records',async(req,res)=>{
       [id,uid,data.source,imageHash,...data.values,body.share_to_friends===true,!!duplicate,duplicate?.record_id??null,draft?.image_base64??null]);
     await setShares(c,id,uid,body);
     await saveMeta(c,id,data.values,data.calculated,draft?.extracted_values);
-    if(body.share_to_friends===true){
-      await c.query(`insert into notification(notification_id,recipient_user_id,actor_user_id,type,record_id,event_key)
-        select gen_random_uuid(),case when f.user_low_id=$1 then f.user_high_id else f.user_low_id end,
-          $1,'NEW_RECORD',$2::uuid,'new_record:'||($2::uuid)::text from friend_relation f
-        where $1 in(f.user_low_id,f.user_high_id) and f.status='ACCEPTED'`,[uid,id]);
-    }
+    await notifyRecordShares(c,id,uid,body.share_to_friends===true);
     await c.query('insert into record_save_request(user_id,idempotency_key,request_hash,record_id) values($1,$2,$3,$4)',[uid,key,requestHash,id]);
     if(imp) await c.query("update record_import set status='CONFIRMED',image_base64=null,original_deleted_at=now(),updated_at=now() where import_id=$1",[imp]);
     return id;
@@ -302,21 +310,27 @@ records.patch('/records/:id',async(req,res)=>{
 });
 records.get('/notifications',async(req,res)=>{
   const items=await rows(db,`select n.notification_id,n.record_id,n.read_at,n.created_at,u.display_name,n.type
-    from notification n join app_user u on u.user_id=n.actor_user_id where n.recipient_user_id=$1
-    order by n.created_at desc limit 100`,[req.user.user_id]);
+    from notification n join app_user u on u.user_id=n.actor_user_id
+    where n.recipient_user_id=$1 and n.type='NEW_RECORD'
+    order by coalesce(n.read_at,n.created_at) desc,n.notification_id desc`,[req.user.user_id]);
   res.json(items);
 });
+records.get('/notifications/unread',async(req,res)=>{
+  res.json(await one(db,`select exists(select 1 from notification
+    where recipient_user_id=$1 and type='NEW_RECORD' and read_at is null) as unread`,[req.user.user_id]));
+});
 records.post('/notifications/read',async(req,res)=>{
-  await db.query('update notification set read_at=now() where recipient_user_id=$1 and read_at is null',[req.user.user_id]);
+  await db.query("update notification set read_at=now() where recipient_user_id=$1 and type='NEW_RECORD' and read_at is null",[req.user.user_id]);
   res.json({ok:true});
 });
 records.post('/notifications/:id/open',async(req,res)=>{
   const id=uuid(req.params.id), uid=req.user.user_id;
   const n=await one(db,'select record_id from notification where notification_id=$1 and recipient_user_id=$2',[id,uid]);
   check(n?.record_id,'알림 대상을 찾을 수 없습니다.',404);
+  await db.query('update notification set read_at=coalesce(read_at,now()) where notification_id=$1 and read_at is null',[id]);
   const item=await accessible(db,n.record_id,uid);
   check(item,'현재 공유 중인 기록을 볼 수 없습니다.',404);
-  await db.query('update notification set read_at=coalesce(read_at,now()),opened_at=coalesce(opened_at,now()) where notification_id=$1',[id]);
+  await db.query('update notification set opened_at=coalesce(opened_at,now()) where notification_id=$1 and opened_at is null',[id]);
   item.comments=await recordComments(item.record_id,uid);
   res.json(item);
 });

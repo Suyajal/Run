@@ -55,8 +55,20 @@ function shell(view){
   $('#sidebar').innerHTML=brand+`<div class="nav-label">${adminMode?'관리자':'러닝 대시보드'}</div><nav class="nav">${links.map(n=>link(n,{notifications:'bell',users:'friends',stats:'activity',audit:'records'}[n]||n)).join('')}</nav>
     <div class="sidebar-end"><nav class="nav">${adminMode?'<a href="/">사용자 앱</a>':link('settings')}${!adminMode&&me?.admin?'<a href="/admin">관리자 페이지</a>':''}</nav><div class="side-profile"><div class="avatar">${esc(me?.display_name?.[0]||'R')}</div><div><strong>${esc(me?.display_name||'러너')}</strong><small>${me?(adminMode?'관리자':'러너 계정'):'둘러보기'}</small></div></div></div>`;
   $('#topbar').innerHTML=`<div class="crumb">${icon(adminMode?'settings':view==='capture'?'upload':view==='notifications'?'bell':view)}${titles[view]||'Suyajal Run'}</div>
-    <div class="top-actions">${!adminMode?`<a href="#notifications" class="icon-button" aria-label="알림">${icon('bell')}${!me?'<i class="dot"></i>':''}</a>`:''}
+    <div class="top-actions">${!adminMode?`<a href="#notifications" class="icon-button" aria-label="알림" id="notification-bell">${icon('bell')}<i class="dot" hidden></i></a>`:''}
     ${me?button(adminMode?'로그아웃':'계정',adminMode?'logout':'settings'):button('로그인','login','primary')}</div>`;
+}
+async function refreshNotificationBadge(){
+  const bell=$('#notification-bell');
+  if(!me||!bell) return;
+  try{
+    const {unread}=await api('/notifications/unread');
+    if(!bell.isConnected||!me) return;
+    bell.querySelector('.dot').hidden=!unread;
+    bell.setAttribute('aria-label',unread?'알림 (새 알림 있음)':'알림');
+  }catch{
+    // The next refresh can retry without interrupting the current screen.
+  }
 }
 const emptyDashboard={items:[],totals:{count:0,distance:0,seconds:0},week:[]};
 const newCommentBadge='<span class="pill comment-new" aria-label="최근 24시간 내 새 댓글">New</span>';
@@ -225,10 +237,13 @@ function groupsPage(groups){
     <div id="group-results" class="home-grid">${panel('내 그룹',groupRows(groups.filter(g=>g.joined)))}${panel('공개 그룹',groupRows(groups.filter(g=>!g.joined)))}</div>`;
 }
 function notificationsPage(items){
-  return head('알림','친구가 공유한 새 러닝 기록을 확인하세요.',button('모두 읽음','read-all'))+
-    panel('알림함',items.length?items.map(n=>`<button class="row" data-action="notification:${esc(n.notification_id)}">
-    <span class="row-icon">${icon('bell')}</span><span class="row-main"><strong>${esc(n.display_name)}님이 러닝 기록을 공유했습니다</strong><small>${when(n.created_at)}</small></span>
-    ${n.read_at?'':'<span class="pill">새 알림</span>'}${icon('arrow')}</button>`).join(''):empty('새 알림이 없습니다.'));
+  const unread=items.filter(n=>!n.read_at), history=items.filter(n=>n.read_at);
+  const list=(entries,message)=>entries.length?entries.map(n=>`<button class="row" data-action="notification:${esc(n.notification_id)}">
+    <span class="row-icon">${icon('bell')}</span><span class="row-main"><strong>${esc(n.display_name)}님이 러닝 기록을 공유했습니다</strong>
+    <small>${when(n.created_at)}${n.read_at?` · 확인 ${when(n.read_at)}`:''}</small></span>${icon('arrow')}</button>`).join(''):empty(message);
+  return head('알림','친구와 그룹의 새 러닝 기록을 확인하세요.',unread.length?button('모두 읽음','read-all'):'')+
+    panel('새 알림',list(unread,'새 알림이 없습니다.'))+
+    `<div class="panel stack"><div class="panel-title"><h2>확인한 알림</h2></div>${list(history,'확인한 알림이 없습니다.')}</div>`;
 }
 function usersPage(){
   return head('사용자 관리','계정 상태와 활동을 조회하고 이용 제한을 관리합니다.')+
@@ -272,6 +287,7 @@ async function statsResults(form){
 async function render(){
   const ticket=++generation, view=page();
   shell(view);
+  void refreshNotificationBadge();
   main.innerHTML='<p class="empty" role="status">불러오는 중…</p>';
   try {
     let content;
@@ -340,7 +356,18 @@ const actions={
     const record=await api('/records/'+id);
     recordDetail(record,'friend-records:'+record.user_id);
   },
-  notification:async id=>recordDetail(await post('/notifications/'+id+'/open')),
+  notification:async id=>{
+    const ticket=generation;
+    let record;
+    try{record=await post('/notifications/'+id+'/open');}
+    catch(err){
+      if(ticket===generation) await render();
+      throw err;
+    }
+    if(ticket!==generation) return;
+    await render();
+    if(ticket+1===generation) recordDetail(record);
+  },
   'read-all':async()=>{await post('/notifications/read');await render();},
   edit:async id=>{const [r,g]=await Promise.all([api('/records/'+id),api('/groups')]);modal('기록 및 공유 수정',recordForm(r,g));},
   'manual-record':async()=>{
@@ -503,4 +530,7 @@ window.addEventListener('hashchange',async()=>{if(dialog.open)dialog.close();awa
 await loadSession();
 await render();
 await joinFromLink();
+if(!adminMode) setInterval(()=>{
+  if(!document.hidden) void refreshNotificationBadge();
+},30000);
 
