@@ -38,9 +38,9 @@ app.use('/api/admin',auth,admin);
 app.use('/api',auth,records,social);
 app.use('/api',(_req,res)=>res.status(404).json({message:'요청을 찾을 수 없습니다.'}));
 app.get('/admin',(_req,res)=>res.sendFile(fileURLToPath(new URL('./public/index.html',import.meta.url))));
-app.get('/downloads/SuyajalRun-1.0.0.apk',(_req,res,next)=>{
+app.get(/^\/downloads\/(SuyajalRun-1\.[01]\.0\.apk)$/,(req,res,next)=>{
   res.type('application/vnd.android.package-archive');
-  res.download(fileURLToPath(new URL('./public/downloads/SuyajalRun-1.0.0.apk',import.meta.url)),err=>{
+  res.download(fileURLToPath(new URL('./public/downloads/'+req.params[0],import.meta.url)),err=>{
     if(err) next(err);
   });
 });

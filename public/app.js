@@ -311,7 +311,8 @@ async function render(){
       <form class="form" data-form="settings"><label class="check"><input name="push" type="checkbox" ${me.push_enabled?'checked':''}>푸시 알림 수신 설정</label>
       <small>기기 푸시 발송은 연결 준비 중입니다. 앱 내 알림은 알림함에서 확인할 수 있습니다.</small>
       <div class="actions"><button class="button">설정 저장</button>
-      <a class="button" href="/downloads/SuyajalRun-1.0.0.apk" download>Android 앱 다운로드</a></div></form></div>`);
+      <a class="button" href="/downloads/SuyajalRun-1.1.0.apk" download>Android 앱 다운로드 (1.1.0)</a></div>
+      <small>1.0.0이 설치되어 있으면 기존 앱을 삭제한 뒤 1.1.0을 설치하세요. 삼성헬스 연동은 Android 14 이상에서 사용할 수 있습니다.</small></form></div>`);
     else content=head('페이지를 찾을 수 없습니다.')+'<a class="button" href="#home">홈으로</a>';
     if(ticket!==generation) return;
     main.innerHTML=content;
