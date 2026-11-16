@@ -58,13 +58,7 @@ function shell(view){
     <div class="top-actions">${!adminMode?`<a href="#notifications" class="icon-button" aria-label="알림">${icon('bell')}${!me?'<i class="dot"></i>':''}</a>`:''}
     ${me?button(adminMode?'로그아웃':'계정',adminMode?'logout':'settings'):button('로그인','login','primary')}</div>`;
 }
-const samples=[
-  {record_id:'sample-1',display_name:'러너',source_app:'SAMSUNG_HEALTH',exercise_date:'2026-11-11',distance_m:6200,duration_sec:2178,avg_pace_sec_km:351,avg_speed_kmh:10.25},
-  {record_id:'sample-2',display_name:'러너',source_app:'APPLE_FITNESS',exercise_date:'2026-11-09',distance_m:5100,duration_sec:1860,avg_pace_sec_km:365,avg_speed_kmh:9.87},
-  {record_id:'sample-3',display_name:'러너',source_app:'SAMSUNG_HEALTH',exercise_date:'2026-11-07',distance_m:7250,duration_sec:2650,avg_pace_sec_km:366,avg_speed_kmh:9.85}
-];
-const demo={items:samples,totals:{count:8,distance:48600,seconds:17542},
-  week:[4200,0,5100,3150,0,6200,0].map((distance,i)=>({day:'2026-11-'+String(6+i).padStart(2,'0'),distance}))};
+const emptyDashboard={items:[],totals:{count:0,distance:0,seconds:0},week:[]};
 const newCommentBadge='<span class="pill comment-new" aria-label="최근 24시간 내 새 댓글">New</span>';
 function commentRow(comment){
   return `<li class="comment">
@@ -93,16 +87,18 @@ function stats(cards){
     <div><div class="stat-label">${label}</div><strong class="number">${value}${unit?`<small>${unit}</small>`:''}</strong></div></div>`).join('')}</div>`;
 }
 async function home(){
-  const [data,groups,recentFriends]=me?await Promise.all([api('/records'),api('/groups'),api('/friends/recent-records')]):[demo,[],[]];
+  const [data,groups,recentFriends]=me?await Promise.all([api('/records'),api('/groups'),api('/friends/recent-records')]):[emptyDashboard,[],[]];
   const top=data.totals, mine=groups.filter(g=>g.joined).slice(0,3);
-  return head('러닝 대시보드',me?`${esc(me.display_name)}님의 러닝 기록과 그룹 활동`:'샘플 기록으로 대시보드를 둘러보세요.',button('기록 등록','capture','primary','plus'))+
+  return head('러닝 대시보드',me?`${esc(me.display_name)}님의 러닝 기록과 그룹 활동`:'로그인하면 내 러닝 기록을 확인할 수 있습니다.',button('기록 등록','capture','primary','plus'))+
     `<section class="hero"><div class="hero-body"><div class="eyebrow">SUYAJAL RUN</div><h2>오늘의 러닝을<br>기록해 보세요</h2><p>삼성 헬스나 Apple Fitness의 러닝 화면을 올려보세요.</p>${button('캡처 업로드','capture','lime','upload')}</div></section>`+
     stats([['누적 거리',km(top.distance),'km','route'],['러닝 기록',num(top.count),'회','run'],['평균 페이스',top.distance?pace(top.seconds*1000/top.distance):'—','/km','clock']])+
     `<div class="home-grid">${panel('최근 러닝',recordList(data.items.slice(0,4)), '<a class="text-link" href="#records">모든 기록 →</a>')}
-    <div>${panel('최근 7일 거리',chart(data.week),'<span class="chart-caption">km</span>')}
+    <div>${data.week.some(day=>Number(day.distance)>0)
+      ?panel('최근 7일 거리',chart(data.week),'<span class="chart-caption">km</span>')
+      :panel('최근 7일 거리',empty('최근 7일간 러닝 기록이 없습니다.'))}
     ${recentFriends.length?panel('최근 친구 기록',recentFriends.map(f=>friendRow(f,true)).join('')):''}
     <div class="panel stack"><div class="panel-title"><h2>내 그룹</h2><a class="text-link" href="#groups">그룹 보기 →</a></div>
-    ${mine.length?groupRows(mine):me?empty('가입한 그룹이 없습니다.'):'<div class="row"><span class="row-icon">'+icon('groups')+'</span><span class="row-main"><strong>수야잘 러닝 크루</strong><small>샘플 그룹</small></span><span class="pill">주간 순위</span></div>'}</div></div></div>`;
+    ${mine.length?groupRows(mine):empty('가입한 그룹이 없습니다.')}</div></div></div>`;
 }
 function modal(title,content){
   dialog.innerHTML=`<div class="modal"><div class="panel-title"><h2>${title}</h2><button class="icon-button" data-action="close" aria-label="닫기">${icon('close')}</button></div>${content}</div>`;
@@ -156,17 +152,17 @@ function timeFields(legend,prefix,value,withHours){
     ${part('초','seconds',seconds,withHours?'max="59"':'max="59.99999999" step="any"')}
     </div></fieldset>`;
 }
-const captureIntro=()=>head('러닝 기록 등록','캡처를 분석한 뒤 운동 수치를 확인하세요.')+
+const captureIntro=()=>head('러닝 기록 등록','캡처를 분석하거나 운동 수치를 직접 입력하세요.')+
   panel('러닝 화면 선택',`<form class="upload" data-form="upload"><span class="row-icon">${icon('upload')}</span>
   <strong>삼성 헬스 또는 Apple Fitness</strong><p>PNG 또는 JPEG · 최대 4 MB</p><input aria-label="러닝 캡처 이미지" type="file" name="capture" accept="image/png,image/jpeg" required>
-  <div class="actions"><button class="button primary">분석 시작</button></div></form>`);
+  <div class="actions"><button class="button primary">분석 시작</button>${button('사용자 입력','manual-record')}</div></form>`);
 function recordForm(r,groups,importId){
-  const meta=r.meta||[], isNew=!!importId;
+  const meta=r.meta||[], isNew=!r.record_id;
   const value=key=>meta.some(m=>m.field_code===key && m.value_origin==='CALCULATED')?'':r[key]??'';
   const numeric=(label,key,step='any',min='0')=>field(label,key,`type="number" step="${step}" min="${min}" value="${esc(value(key))}"`);
   const known=Object.keys(r).filter(k=>details.some(([f])=>f===k)).length;
   return `<form class="form" data-form="save-record" data-id="${esc(r.record_id||'')}" data-version="${esc(r.version||'')}" data-import="${esc(importId||'')}">
-    ${isNew?`<p class="info">${known?'인식한 값과 빈 항목을 확인해 주세요.':'자동으로 읽은 값이 없습니다. 운동 화면을 확인해 입력해 주세요.'} 페이스와 속도를 비우면 자동 계산됩니다.</p>`:''}
+    ${isNew?`<p class="info">${!importId?'운동 정보를 입력해 주세요.':known?'인식한 값과 빈 항목을 확인해 주세요.':'자동으로 읽은 값이 없습니다. 운동 화면을 확인해 입력해 주세요.'} 페이스와 속도를 비우면 자동 계산됩니다.</p>`:''}
     <div class="form-grid">
     <label class="field">기록 출처<select name="source_app" required><option value="">선택</option>
     ${['SAMSUNG_HEALTH','APPLE_FITNESS'].map(s=>`<option value="${s}" ${s===r.source_app?'selected':''}>${source(s)}</option>`).join('')}</select></label>
@@ -179,7 +175,7 @@ function recordForm(r,groups,importId){
     ${numeric('고도 상승 (m)','elevation_gain_m')}</div>
     <fieldset><legend>공유 범위</legend><label class="check"><input type="checkbox" name="share_to_friends" ${r.share_to_friends?'checked':''}>친구에게 공유</label>
       ${groups.filter(g=>g.joined).map(g=>`<label class="check"><input type="checkbox" name="groups" value="${esc(g.group_id)}" ${r.groups?.includes(g.group_id)?'checked':''}>${esc(g.group_name)}</label>`).join('')}</fieldset>
-    <div class="actions"><button class="button primary">확인 후 저장</button>${isNew?button('취소','cancel-import:'+importId):''}</div>
+    <div class="actions"><button class="button primary">확인 후 저장</button>${isNew?button('취소',importId?'cancel-import:'+importId:'refresh'):''}</div>
     </form>`;
 }
 function groupRows(items){
@@ -288,7 +284,7 @@ async function render(){
         content=head('관리 이력')+panel('최근 작업',history.map(h=>`<div class="row"><span class="row-icon">${icon('records')}</span><span class="row-main"><strong>${esc(h.action_code)} · ${esc(h.actor)}</strong><small>${when(h.created_at)} · ${esc(h.target||'—')} · ${esc(h.request_id)}</small></span><span class="pill">${esc(h.result_code)}</span></div>`).join('')||empty('관리 이력이 없습니다.'));
       }else content=usersPage();
     } else if(view==='home') content=await home();
-    else if(view==='records') content=head('내 기록',me?'등록한 러닝 기록을 확인하세요.':'샘플 기록을 둘러보세요.',button('기록 등록','capture','primary','plus'))+panel('러닝 기록',recordList(me?(await api('/records')).items:demo.items));
+    else if(view==='records') content=head('내 기록',me?'등록한 러닝 기록을 확인하세요.':'로그인하면 내 러닝 기록을 확인할 수 있습니다.',button('기록 등록','capture','primary','plus'))+panel('러닝 기록',recordList(me?(await api('/records')).items:[]));
     else if(!me) content=authWall();
     else if(view==='capture') content=captureIntro();
     else if(view==='friends') content=friendsPage(await api('/friends'));
@@ -338,7 +334,7 @@ const actions={
   login,close:()=>dialog.close(),refresh:render,capture:()=>guarded('capture'),settings:()=>navTo('settings'),
   logout:async()=>{await post('/auth/logout');me=null;dialog.close();navTo(adminMode?'users':'home');},
   signup,
-  record:async id=>recordDetail(samples.find(s=>s.record_id===id)??await api('/records/'+id)),
+  record:async id=>recordDetail(await api('/records/'+id)),
   'friend-records':friendRecords,
   'friend-record':async id=>{
     const record=await api('/records/'+id);
@@ -347,6 +343,12 @@ const actions={
   notification:async id=>recordDetail(await post('/notifications/'+id+'/open')),
   'read-all':async()=>{await post('/notifications/read');await render();},
   edit:async id=>{const [r,g]=await Promise.all([api('/records/'+id),api('/groups')]);modal('기록 및 공유 수정',recordForm(r,g));},
+  'manual-record':async()=>{
+    if(!me){login();return;}
+    const ticket=++generation;
+    const groups=await api('/groups');
+    if(ticket===generation) showRecordForm({},groups);
+  },
   'cancel-import':async id=>{await api('/imports/'+id,{method:'DELETE'});await render();},
   'friend-search':()=>modal('친구 검색',`<form class="form" data-form="friend-search">${field('친구 아이디','login_id','required minlength="3" maxlength="50"')}<button class="button primary">검색</button></form>`),
   'friend-request':async id=>{await post('/friends/request',{user_id:id});dialog.close();toast('친구 요청을 보냈습니다.');await render();},
@@ -368,9 +370,18 @@ function restrictionForm(id,release){
     <button class="button primary">${release?'제한 해제 적용':'제한 적용'}</button></form>`);
 }
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+function showRecordForm(record,groups,importId,message=''){
+  main.innerHTML=head('러닝 수치 확인','기록에 저장할 수치와 공유 범위를 확인하세요.')+
+    panel('운동 정보',message+recordForm(record,groups,importId));
+}
 async function uploadCapture(form,formData){
+  const ticket=++generation;
   const result=await post('/imports',formData);
-  const id=result.id, ticket=generation;
+  const id=result.id;
+  if(ticket!==generation){
+    await api('/imports/'+id,{method:'DELETE'});
+    return;
+  }
   main.innerHTML=head('러닝 기록 등록')+panel('캡처 분석 중',`<p class="info" role="status">러닝 화면에서 운동 수치를 읽고 있습니다.</p><div class="actions">${button('분석 취소','cancel-import:'+id)}</div>`);
   for(let i=0;i<90 && ticket===generation;i++){
     await delay(1500);
@@ -378,12 +389,12 @@ async function uploadCapture(form,formData){
     const draft=await api('/imports/'+id);
     if(draft.status==='READY'){
       const groups=await api('/groups');
-      if(ticket===generation) main.innerHTML=head('러닝 수치 확인','기록에 저장할 수치와 공유 범위를 확인하세요.')+
-        panel('운동 정보',(draft.error_code==='OCR_FAILED'
+      if(ticket===generation) showRecordForm({...draft.extracted_values,source_app:draft.source_app},groups,id,
+        draft.error_code==='OCR_FAILED'
           ? '<p class="info" role="alert">서버에서 이미지 분석을 완료하지 못했습니다. 운동 수치를 직접 입력하거나 캡처를 다시 올려 주세요.</p>'
           : Object.keys(draft.extracted_values||{}).length===0
             ? '<p class="info" role="status">이미지에서 운동 수치를 찾지 못했습니다. 운동 수치를 직접 입력해 주세요.</p>'
-            : '')+recordForm({...draft.extracted_values,source_app:draft.source_app},groups,id));
+            : '');
       return;
     }
     if(draft.status!=='ANALYZING') break;
@@ -403,7 +414,7 @@ async function saveRecord(form,formData,values){
     await api('/records/'+id,{method:'PATCH',body:{...body,version:Number(form.dataset.version)}});
     dialog.close();
   }else{
-    body.import_id=form.dataset.import;
+    if(form.dataset.import) body.import_id=form.dataset.import;
     const submit=async()=>{
       const json=JSON.stringify(body);
       if(form.dataset.lastBody!==json){form.dataset.key=crypto.randomUUID();form.dataset.lastBody=json;}

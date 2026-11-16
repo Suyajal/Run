@@ -75,7 +75,8 @@ records.post('/records/:id/comments',async(req,res)=>{
     insert into record_comment (record_id,user_id,comment_id,body)
     select r.record_id,$2,$3,$4 from running_record r where ${recordAccess}
     returning comment_id,user_id,body,created_at
-  ) select comment_id,body,created_at,display_name from inserted join app_user using(user_id)`,
+  ) select c.comment_id,c.body,c.created_at,u.display_name
+    from inserted c join app_user u using(user_id)`,
   [id,uid,randomUUID(),body]);
   check(comment,'기록을 볼 수 없습니다.',404);
   res.status(201).json(comment);
@@ -246,30 +247,32 @@ async function saveMeta(c,id,values,calculated,recognized={},previous=[]){
   }
 }
 records.post('/records',async(req,res)=>{
-  const body=req.body, uid=req.user.user_id, imp=uuid(body.import_id), key=uuid(req.get('Idempotency-Key'));
+  const body=req.body, uid=req.user.user_id, key=uuid(req.get('Idempotency-Key'));
+  const imp=Object.hasOwn(body,'import_id')?uuid(body.import_id):null;
   const data=normalized(body), requestHash=digest(JSON.stringify(body));
   const id=await transaction(async c=>{
     await c.query('select user_id from app_user where user_id=$1 for update',[uid]);
     const retry=await one(c,'select record_id,request_hash from record_save_request where user_id=$1 and idempotency_key=$2',[uid,key]);
     if(retry){check(retry.request_hash===requestHash,'저장 요청이 변경되었습니다.',409);return retry.record_id;}
-    const draft=await one(c,`select image_sha256,extracted_values from record_import where import_id=$1 and user_id=$2 and status='READY'
-      and expires_at>now() for update`,[imp,uid]);
-    check(draft,'이미 확정했거나 만료된 분석 내역입니다.',409);
+    const draft=imp?await one(c,`select image_sha256,extracted_values,image_base64 from record_import
+      where import_id=$1 and user_id=$2 and status='READY' and expires_at>now() for update`,[imp,uid]):null;
+    check(!imp||draft,'이미 확정했거나 만료된 분석 내역입니다.',409);
+    const imageHash=draft?.image_sha256??null;
     const [day,distance,duration]=data.values;
     const duplicate=await one(c,`select record_id,exercise_date::text,distance_m,duration_sec from running_record
       where user_id=$1 and deleted_at is null and (image_sha256=$2 or
-       (exercise_date=$3 and distance_m=$4 and duration_sec=$5)) order by created_at desc limit 1`,[uid,draft.image_sha256,day,distance,duration]);
+       (exercise_date=$3 and distance_m=$4 and duration_sec=$5)) order by created_at desc limit 1`,[uid,imageHash,day,distance,duration]);
     if(duplicate && body.duplicate_of_record_id!==duplicate.record_id) {
       throw Object.assign(Error('유사한 기록이 있습니다. 비교 후 저장해 주세요.'),{status:409,details:{duplicate}});
     }
     const id=randomUUID();
     await c.query(`insert into running_record(record_id,user_id,source_app,image_sha256,
       exercise_date,distance_m,duration_sec,avg_pace_sec_km,avg_speed_kmh,avg_cadence_spm,avg_heart_rate_bpm,
-      elevation_gain_m,share_to_friends,duplicate_confirmed,duplicate_of_record_id)
-      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
-      [id,uid,data.source,draft.image_sha256,...data.values,body.share_to_friends===true,!!duplicate,duplicate?.record_id??null]);
+      elevation_gain_m,share_to_friends,duplicate_confirmed,duplicate_of_record_id,image_base64)
+      values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+      [id,uid,data.source,imageHash,...data.values,body.share_to_friends===true,!!duplicate,duplicate?.record_id??null,draft?.image_base64??null]);
     await setShares(c,id,uid,body);
-    await saveMeta(c,id,data.values,data.calculated,draft.extracted_values);
+    await saveMeta(c,id,data.values,data.calculated,draft?.extracted_values);
     if(body.share_to_friends===true){
       await c.query(`insert into notification(notification_id,recipient_user_id,actor_user_id,type,record_id,event_key)
         select gen_random_uuid(),case when f.user_low_id=$1 then f.user_high_id else f.user_low_id end,
@@ -277,9 +280,7 @@ records.post('/records',async(req,res)=>{
         where $1 in(f.user_low_id,f.user_high_id) and f.status='ACCEPTED'`,[uid,id]);
     }
     await c.query('insert into record_save_request(user_id,idempotency_key,request_hash,record_id) values($1,$2,$3,$4)',[uid,key,requestHash,id]);
-    await c.query(`update running_record set image_base64=(select image_base64 from record_import where import_id=$1)
-      where record_id=$2`,[imp,id]);
-    await c.query("update record_import set status='CONFIRMED',image_base64=null,original_deleted_at=now(),updated_at=now() where import_id=$1",[imp]);
+    if(imp) await c.query("update record_import set status='CONFIRMED',image_base64=null,original_deleted_at=now(),updated_at=now() where import_id=$1",[imp]);
     return id;
   });
   res.json({record_id:id});
